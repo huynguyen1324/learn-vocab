@@ -386,6 +386,7 @@ function renderFlashcard() {
   const next = document.querySelector("#flashcard-next");
   if (flashcards.index >= flashcards.cards.length) {
     document.querySelector("#flashcard-count").textContent = "Đã hoàn thành lượt ôn.";
+    document.querySelector("#flashcard-stage").textContent = "";
     document.querySelector("#flashcard-front").textContent = "";
     document.querySelector("#flashcard-back").hidden = true;
     flashcardButton.disabled = true;
@@ -398,6 +399,7 @@ function renderFlashcard() {
   }
   const card = flashcards.cards[flashcards.index];
   document.querySelector("#flashcard-count").textContent = `Câu ${flashcards.index + 1}/${flashcards.cards.length}`;
+  document.querySelector("#flashcard-stage").textContent = `Lần ôn ${card.repetition_count}/8`;
   document.querySelector("#flashcard-front").textContent = card.front;
   document.querySelector("#flashcard-back").textContent = card.back;
   document.querySelector("#flashcard-back").hidden = true;

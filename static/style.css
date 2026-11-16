@@ -433,6 +433,25 @@ dialog form {
     min-width: 680px;
   }
 
+  .english-column,
+  .vietnamese-column {
+    width: 21%;
+  }
+
+  .review-column,
+  .actions-column {
+    width: 24%;
+  }
+
+  .actions {
+    gap: 0.45rem;
+  }
+
+  .actions button {
+    min-height: 44px;
+    padding-inline: 0.4rem;
+  }
+
   .choices {
     grid-template-columns: 1fr;
   }
