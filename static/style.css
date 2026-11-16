@@ -370,15 +370,99 @@ dialog form {
 
 @media (max-width: 600px) {
   .container {
-    margin: 1rem auto;
+    width: calc(100% - 1.25rem);
+    margin: 0.75rem auto;
+  }
+
+  h1 {
+    font-size: 1.45rem;
+  }
+
+  header,
+  .section-heading,
+  .filters,
+  .dialog-actions {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 0.65rem;
+  }
+
+  nav {
+    display: grid;
+    width: 100%;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 0.4rem;
+  }
+
+  nav button {
+    min-height: 44px;
+    padding: 0.5rem 0.35rem;
+    font-size: 0.85rem;
+  }
+
+  button,
+  input,
+  select {
+    min-height: 44px;
+  }
+
+  .section-heading > button,
+  .filters label,
+  .search-label,
+  .search-label input,
+  .filters select,
+  .mode-choices button,
+  .dialog-actions button {
+    width: 100%;
+  }
+
+  .search-label {
+    min-width: 0;
+  }
+
+  .mode-choices {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  .table-wrap {
+    -webkit-overflow-scrolling: touch;
+  }
+
+  table {
+    min-width: 680px;
   }
 
   .choices {
     grid-template-columns: 1fr;
   }
 
+  .quiz-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .quiz-actions button {
+    width: 100%;
+    min-height: 44px;
+    padding-inline: 0.5rem;
+  }
+
+  .flashcard {
+    min-height: 11rem;
+    padding: 1.25rem;
+    font-size: clamp(1.25rem, 6vw, 1.75rem);
+  }
+
+  dialog {
+    width: calc(100% - 1rem);
+    max-height: calc(100% - 1rem);
+    overflow-y: auto;
+    padding: 1.1rem;
+  }
+
   th,
   td {
-    padding: 0.6rem;
+    padding: 0.65rem;
   }
 }
