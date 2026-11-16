@@ -1,0 +1,8 @@
+- Lần 1: Ôn từ mới
+- Lần 2: Sau 1 giờ
+- Lần 3: Sau 1 ngày
+- Lần 4: Sau 3 ngày
+- Lần 5: Sau 1 tuần
+- Lần 6: Sau 1 tháng
+- Lần 7: Sau 3 tháng
+- Lần 8: Sau 1 năm

@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Học từ vựng</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <script src="{{ url_for('static', filename='app.js') }}" defer></script>
+</head>
+<body>
+  <main class="container">
+    <header>
+      <h1>Học từ vựng</h1>
+      <nav aria-label="Điều hướng chính">
+        <button id="list-tab" class="tab active" type="button">Danh sách từ</button>
+        <button id="quiz-tab" class="tab" type="button">Ôn trắc nghiệm</button>
+        <button id="flashcard-tab" class="tab" type="button">Ôn lật thẻ</button>
+      </nav>
+    </header>
+
+    <p id="notice" class="notice" role="status" hidden></p>
+
+    <section id="list-view">
+      <div class="section-heading">
+        <h2>Danh sách từ</h2>
+        <button id="add-word" class="primary" type="button">Thêm từ</button>
+      </div>
+      <div class="filters">
+        <label class="search-label">Tìm kiếm
+          <input id="search" type="search" placeholder="Từ tiếng Anh hoặc nghĩa tiếng Việt">
+        </label>
+        <label>Lọc theo trạng thái
+          <select id="status-filter">
+            <option value="all">Tất cả</option>
+            <option value="due">Đến hạn</option>
+            <option value="upcoming">Chưa đến hạn</option>
+          </select>
+        </label>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <colgroup>
+            <col class="english-column">
+            <col class="vietnamese-column">
+            <col class="stage-column">
+            <col class="review-column">
+            <col class="actions-column">
+          </colgroup>
+          <thead>
+            <tr>
+              <th scope="col">Tiếng Anh</th>
+              <th scope="col">Nghĩa tiếng Việt</th>
+              <th scope="col">Số lần ôn</th>
+              <th scope="col">Thời điểm ôn tiếp theo</th>
+              <th scope="col"><span class="sr-only">Thao tác</span></th>
+            </tr>
+          </thead>
+          <tbody id="word-list"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="quiz-view" hidden>
+      <div class="section-heading">
+        <div>
+          <h2>Ôn trắc nghiệm</h2>
+          <p>Chọn chiều ôn để bắt đầu.</p>
+        </div>
+      </div>
+      <div class="mode-choices">
+        <button id="start-quiz-av" type="button">Ôn Anh - Việt</button>
+        <button id="start-quiz-va" type="button">Ôn Việt - Anh</button>
+      </div>
+      <div id="quiz-panel" class="quiz-panel" hidden>
+        <section class="question-card" aria-label="Câu hỏi">
+          <p id="question-count" class="muted"></p>
+          <h3 id="question-prompt"></h3>
+          <p id="question-stage" class="muted"></p>
+        </section>
+        <section class="answer-panel" aria-label="Các lựa chọn">
+          <div id="choices" class="choices"></div>
+          <p id="feedback" role="status" aria-live="polite"></p>
+          <div class="quiz-actions">
+            <button id="mark-complete" type="button" hidden>Đánh dấu hoàn thành</button>
+            <button id="next-question" class="primary" type="button" hidden>Tiếp theo</button>
+          </div>
+        </section>
+      </div>
+    </section>
+    <section id="flashcard-view" hidden>
+      <div class="section-heading">
+        <div>
+          <h2>Ôn lật thẻ</h2>
+          <p>Chọn chiều ôn để bắt đầu.</p>
+        </div>
+      </div>
+      <div class="mode-choices">
+        <button id="start-flashcard-av" type="button">Ôn Anh - Việt</button>
+        <button id="start-flashcard-va" type="button">Ôn Việt - Anh</button>
+      </div>
+      <div id="flashcard-panel" class="quiz-panel" hidden>
+        <p id="flashcard-count" class="muted"></p>
+        <div id="flashcard-progress" class="flashcard-progress" role="progressbar" aria-label="Thời gian trả lời" aria-valuemin="0" aria-valuemax="20000" aria-valuenow="0">
+          <div id="flashcard-progress-fill"></div>
+        </div>
+        <button id="flashcard" class="flashcard" type="button" aria-label="Lật thẻ">
+          <span id="flashcard-front"></span>
+          <span id="flashcard-back" hidden></span>
+        </button>
+        <p id="flashcard-feedback" role="status" aria-live="polite"></p>
+        <div class="quiz-actions">
+          <button id="flashcard-correct" type="button" disabled>Nhớ đúng</button>
+          <button id="flashcard-wrong" type="button" disabled>Nhớ sai</button>
+          <button id="flashcard-relative" type="button" disabled>Nhớ tương đối</button>
+          <button id="flashcard-next" class="primary" type="button" disabled>Tiếp theo</button>
+          </div>
+      </div>
+    </section>
+  </main>
+
+  <dialog id="word-dialog">
+    <form id="word-form">
+      <h2 id="dialog-title">Thêm từ</h2>
+      <label>Từ tiếng Anh
+        <input name="english" maxlength="500" required autocomplete="off">
+      </label>
+      <label>Nghĩa tiếng Việt
+        <input name="vietnamese" maxlength="500" required autocomplete="off">
+      </label>
+      <label id="complete-option-label" class="checkbox-label">
+        <input id="complete-option" name="complete" type="checkbox">
+        Đánh dấu hoàn thành ngay
+      </label>
+      <p id="form-error" class="error" role="alert"></p>
+      <div class="dialog-actions">
+        <button id="cancel-word" type="button">Hủy</button>
+        <button class="primary" type="submit">Lưu</button>
+      </div>
+    </form>
+  </dialog>
+</body>
+</html>
