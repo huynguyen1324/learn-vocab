@@ -372,9 +372,9 @@ class VocabularyAppTests(unittest.TestCase):
 
     def test_flashcard_correct_thresholds_wrong_timeout_and_completion(self):
         cases = [
-            (1500, 3, 6), (2000, 3, 6), (2001, 3, 5),
-            (5000, 3, 5), (5001, 3, 4), (10000, 3, 4),
-            (10001, 3, 3), (20000, 3, 3),
+            (1500, 3, 5), (2000, 3, 5), (2001, 3, 4),
+            (5000, 3, 4), (5001, 3, 3), (10000, 3, 3),
+            (10001, 3, 2), (20000, 3, 3),
         ]
         for elapsed, starting_count, expected_count in cases:
             word_id = self.insert_word(f"word-{elapsed}-{starting_count}", "nghĩa", repetition_count=starting_count)

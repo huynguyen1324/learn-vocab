@@ -447,7 +447,7 @@ def create_app(test_config=None):
             next_review_at = (answered_at + timedelta(hours=1)).isoformat()
         else:
             elapsed = response_time_ms / 1000
-            change = 3 if elapsed <= 2 else 2 if elapsed <= 5 else 1 if elapsed <= 10 else 0
+            change = 2 if elapsed <= 2 else 1 if elapsed <= 5 else 0 if elapsed <= 10 else -1
             new_count = min(max(word["repetition_count"] + change, 0), 8)
             if new_count == 8:
                 next_review_at = None

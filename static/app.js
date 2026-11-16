@@ -336,24 +336,30 @@ async function answerFlashcard(result, elapsed = null) {
   stopFlashcardTimer();
   const card = flashcards.cards[flashcards.index];
   try {
-    await api("/api/flashcard/answer", {
-      method: "POST",
-      body: JSON.stringify({
-        word_id: card.word_id,
-        result,
-        ...(elapsed === null ? {} : { response_time_ms: elapsed }),
-      }),
-    });
+    if (result === "known") {
+      await api(`/api/words/${card.word_id}/complete`, { method: "POST" });
+    } else {
+      await api("/api/flashcard/answer", {
+        method: "POST",
+        body: JSON.stringify({
+          word_id: card.word_id,
+          result,
+          ...(elapsed === null ? {} : { response_time_ms: elapsed }),
+        }),
+      });
+    }
     const messages = {
       timeout: "Quá 20 giây: đã tự lật thẻ và trừ 1 mốc ôn.",
       relative: "Đã lưu. Mốc ôn giữ nguyên, lịch ôn được dời theo mốc hiện tại.",
       correct: "Đã lưu kết quả nhớ đúng.",
       wrong: "Đã lưu kết quả nhớ sai.",
+      known: "Đã đánh dấu từ này hoàn thành.",
     };
     document.querySelector("#flashcard-feedback").textContent = messages[result];
     document.querySelector("#flashcard-correct").disabled = true;
     document.querySelector("#flashcard-wrong").disabled = true;
     document.querySelector("#flashcard-relative").disabled = true;
+    document.querySelector("#flashcard-known").disabled = true;
     document.querySelector("#flashcard-next").disabled = false;
   } catch (error) {
     flashcards.answered = false;
@@ -372,6 +378,7 @@ function flipFlashcard(automatic = false) {
   document.querySelector("#flashcard-correct").disabled = automatic;
   document.querySelector("#flashcard-wrong").disabled = automatic;
   document.querySelector("#flashcard-relative").disabled = automatic;
+  document.querySelector("#flashcard-known").disabled = automatic;
   if (automatic) answerFlashcard("timeout");
 }
 
@@ -393,6 +400,7 @@ function renderFlashcard() {
     correct.disabled = true;
     wrong.disabled = true;
     document.querySelector("#flashcard-relative").disabled = true;
+    document.querySelector("#flashcard-known").disabled = true;
     next.disabled = true;
     panel.hidden = false;
     return;
@@ -411,6 +419,7 @@ function renderFlashcard() {
   correct.disabled = true;
   wrong.disabled = true;
   document.querySelector("#flashcard-relative").disabled = true;
+  document.querySelector("#flashcard-known").disabled = true;
   next.disabled = true;
   flashcards.startedAt = performance.now();
   flashcards.timer = setInterval(() => {
@@ -445,6 +454,7 @@ flashcardButton.addEventListener("click", () => flipFlashcard());
 document.querySelector("#flashcard-correct").addEventListener("click", () => answerFlashcard("correct", flashcards.flippedAt));
 document.querySelector("#flashcard-wrong").addEventListener("click", () => answerFlashcard("wrong"));
 document.querySelector("#flashcard-relative").addEventListener("click", () => answerFlashcard("relative"));
+document.querySelector("#flashcard-known").addEventListener("click", () => answerFlashcard("known"));
 document.querySelector("#flashcard-next").addEventListener("click", () => {
   flashcards.index += 1;
   renderFlashcard();
