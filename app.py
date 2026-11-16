@@ -381,7 +381,7 @@ def create_app(test_config=None):
             return jsonify(error="Chế độ ôn thẻ không hợp lệ."), 400
         rows = get_db().execute(
             "SELECT id, english, vietnamese, repetition_count FROM vocabulary "
-            "WHERE next_review_at IS NOT NULL AND next_review_at <= ? ORDER BY id",
+            "WHERE next_review_at IS NOT NULL AND next_review_at <= ? ORDER BY RANDOM()",
             (local_now().isoformat(),),
         ).fetchall()
         if mode == "va":
