@@ -2,11 +2,14 @@ import sqlite3
 import sys
 from pathlib import Path
 
-from app import create_app, local_now
+ROOT = Path(__file__).resolve().parents[1]
+if __package__ in {None, ""}:
+    sys.path.insert(0, str(ROOT))
+
+from app import create_app, local_now, required_text
 
 
-ROOT = Path(__file__).resolve().parent
-INPUT_PATH = ROOT / "input_vocab.txt"
+INPUT_PATH = ROOT / "tools" / "input_vocab.txt"
 DATABASE_PATH = ROOT / "instance" / "vocabulary.sqlite3"
 
 
@@ -16,7 +19,10 @@ def parse_vocabulary(text):
         raise ValueError("File không có từ vựng.")
     if len(lines) % 2:
         raise ValueError("File phải có đủ cặp dòng tiếng Anh / nghĩa tiếng Việt.")
-    return list(zip(lines[::2], lines[1::2]))
+    return [
+        (required_text(english, "Từ tiếng Anh"), required_text(vietnamese, "Nghĩa tiếng Việt"))
+        for english, vietnamese in zip(lines[::2], lines[1::2])
+    ]
 
 
 def import_vocabulary(input_path=INPUT_PATH, database_path=DATABASE_PATH):

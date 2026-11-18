@@ -2,10 +2,13 @@ import sqlite3
 import sys
 from pathlib import Path
 
+ROOT = Path(__file__).resolve().parents[1]
+if __package__ in {None, ""}:
+    sys.path.insert(0, str(ROOT))
+
 from app import create_app
 
 
-ROOT = Path(__file__).resolve().parent
 DATABASE_PATH = ROOT / "instance" / "vocabulary.sqlite3"
 
 

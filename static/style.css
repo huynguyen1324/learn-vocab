@@ -143,21 +143,25 @@ table {
   text-align: left;
 }
 
+.number-column { width: 6%; }
+
 .english-column,
 .vietnamese-column {
-  width: 25%;
+  width: 20%;
 }
 
+.practice-column { width: 9%; }
+
 .stage-column {
-  width: 10%;
+  width: 13%;
 }
 
 .review-column {
-  width: 25%;
+  width: 18%;
 }
 
 .actions-column {
-  width: 15%;
+  width: 14%;
 }
 
 th,
@@ -176,6 +180,11 @@ th {
 
 tbody tr:last-child td {
   border-bottom: 0;
+}
+
+tbody tr.needs-practice {
+  color: #991b1b;
+  background: #fef2f2;
 }
 
 .actions {
@@ -253,6 +262,10 @@ dialog form {
 
 .dialog-actions {
   justify-content: end;
+}
+
+.quiz-panel[hidden] {
+  display: none;
 }
 
 .quiz-panel {
@@ -430,17 +443,7 @@ dialog form {
   }
 
   table {
-    min-width: 680px;
-  }
-
-  .english-column,
-  .vietnamese-column {
-    width: 21%;
-  }
-
-  .review-column,
-  .actions-column {
-    width: 24%;
+    min-width: 900px;
   }
 
   .actions {

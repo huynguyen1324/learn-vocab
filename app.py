@@ -3,6 +3,7 @@ import json
 import math
 import random
 import sqlite3
+import unicodedata
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -13,14 +14,14 @@ from werkzeug.exceptions import HTTPException
 ROOT = Path(__file__).resolve().parent
 SERVER_CONFIG = ROOT / "config.json"
 SCHEMA = """
-CREATE TABLE IF NOT EXISTS vocabulary (
+CREATE TABLE IF NOT EXISTS collocations (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    english TEXT NOT NULL,
-    english_key TEXT NOT NULL UNIQUE,
+    english TEXT NOT NULL UNIQUE COLLATE NOCASE,
     vietnamese TEXT NOT NULL,
-    repetition_count INTEGER NOT NULL CHECK (repetition_count BETWEEN 0 AND 8),
+    repetition_level INTEGER NOT NULL CHECK (repetition_level BETWEEN 0 AND 8),
+    practice_count INTEGER NOT NULL DEFAULT 0 CHECK (practice_count >= 0),
     next_review_at TEXT,
-    CHECK (next_review_at IS NOT NULL OR repetition_count = 8)
+    CHECK (next_review_at IS NOT NULL OR repetition_level = 8)
 );
 """
 
@@ -73,7 +74,16 @@ def next_review_for_count(count, answered_at):
 
 
 def normalize_meaning(value):
-    return " ".join(value.casefold().split())
+    return " ".join(unicodedata.normalize("NFC", value).casefold().split())
+
+
+def required_text(value, label):
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"{label} không được để trống.")
+    value = value.strip()
+    if len(value) > 500:
+        raise ValueError(f"{label} không được dài quá 500 ký tự.")
+    return value
 
 
 def get_db():
@@ -100,23 +110,11 @@ def create_app(test_config=None):
             "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'vocabulary'"
         ).fetchone()
         if table:
-            columns = {row[1] for row in connection.execute("PRAGMA table_info(vocabulary)")}
-            if "stage" in columns and "repetition_count" not in columns:
-                connection.execute("BEGIN IMMEDIATE")
-                connection.execute("ALTER TABLE vocabulary RENAME TO vocabulary_old")
-                connection.execute(SCHEMA.strip().removesuffix(";"))
-                connection.execute(
-                    "INSERT INTO vocabulary (id, english, english_key, vietnamese, repetition_count, next_review_at) "
-                    "SELECT id, english, english_key, vietnamese, "
-                    "CASE WHEN stage = 8 AND next_review_at IS NULL THEN 8 ELSE stage - 1 END, next_review_at "
-                    "FROM vocabulary_old"
-                )
-                connection.execute("DROP TABLE vocabulary_old")
-                connection.commit()
-            elif "repetition_count" not in columns:
-                raise sqlite3.DatabaseError("Unrecognized vocabulary database schema.")
-        else:
-            connection.executescript(SCHEMA)
+            raise sqlite3.DatabaseError(
+                "Legacy vocabulary table exists. Run export_db_vocab.py and the explicit database reset "
+                "before starting the app; startup will not convert or delete your data."
+            )
+        connection.executescript(SCHEMA)
     except Exception:
         connection.rollback()
         raise
@@ -147,14 +145,11 @@ def create_app(test_config=None):
             return None
         return mode
 
-    def required_text(data, key, label):
-        value = data.get(key)
-        if not isinstance(value, str) or not value.strip():
-            raise ValueError(f"{label} không được để trống.")
-        value = value.strip()
-        if len(value) > 500:
-            raise ValueError(f"{label} không được dài quá 500 ký tự.")
-        return value
+    def reject_duplicate_english(english, word_id=None):
+        # SQLite NOCASE handles ASCII; casefold also catches Unicode equivalents.
+        for row in get_db().execute("SELECT id, english FROM collocations"):
+            if row["id"] != word_id and unicodedata.normalize("NFC", row["english"]).casefold() == english.casefold():
+                raise sqlite3.IntegrityError("Duplicate English text.")
 
     @app.get("/")
     def index():
@@ -170,14 +165,14 @@ def create_app(test_config=None):
         now = local_now().isoformat()
         # shortcut: filters scan the full personal vocabulary; use indexed search if datasets grow large.
         rows = get_db().execute(
-            "SELECT id, english, vietnamese, repetition_count, next_review_at "
-            "FROM vocabulary ORDER BY english_key"
+            "SELECT id, english, vietnamese, repetition_level, practice_count, next_review_at "
+            "FROM collocations ORDER BY english COLLATE NOCASE"
         ).fetchall()
         result = []
         for row in rows:
             if search and search not in row["english"].casefold() and search not in row["vietnamese"].casefold():
                 continue
-            completed = row["repetition_count"] == 8 and row["next_review_at"] is None
+            completed = row["repetition_level"] == 8 and row["next_review_at"] is None
             due = row["next_review_at"] is not None and row["next_review_at"] <= now
             if status_filter == "due" and not due:
                 continue
@@ -187,8 +182,9 @@ def create_app(test_config=None):
                 "id": row["id"],
                 "english": row["english"],
                 "vietnamese": row["vietnamese"],
-                "repetition_count": row["repetition_count"],
-                "status": "Hoàn thành" if completed else f"{row['repetition_count']}/8",
+                "repetition_level": row["repetition_level"],
+                "practice_count": row["practice_count"],
+                "status": "Hoàn thành" if completed else f"{row['repetition_level']}/8",
                 "next_review_at": row["next_review_at"],
             })
         return jsonify(words=result)
@@ -197,17 +193,18 @@ def create_app(test_config=None):
     def add_word():
         try:
             data = payload()
-            english = required_text(data, "english", "Từ tiếng Anh")
-            vietnamese = required_text(data, "vietnamese", "Nghĩa tiếng Việt")
+            english = unicodedata.normalize("NFC", required_text(data.get("english"), "Từ tiếng Anh")).lower()
+            vietnamese = required_text(data.get("vietnamese"), "Nghĩa tiếng Việt")
             complete = data.get("complete", False)
             if not isinstance(complete, bool):
                 raise ValueError("Trạng thái hoàn thành không hợp lệ.")
-            repetition_count = 8 if complete else 0
+            repetition_level = 8 if complete else 0
             next_review_at = None if complete else local_now().isoformat()
+            reject_duplicate_english(english)
             cursor = get_db().execute(
-                "INSERT INTO vocabulary (english, english_key, vietnamese, repetition_count, next_review_at) "
-                "VALUES (?, ?, ?, ?, ?)",
-                (english.lower(), english.casefold(), vietnamese.lower(), repetition_count, next_review_at),
+                "INSERT INTO collocations (english, vietnamese, repetition_level, next_review_at) "
+                "VALUES (?, ?, ?, ?)",
+                (english, vietnamese.lower(), repetition_level, next_review_at),
             )
         except ValueError as error:
             return jsonify(error=str(error)), 400
@@ -215,10 +212,27 @@ def create_app(test_config=None):
             return jsonify(error="Từ tiếng Anh này đã có trong danh sách."), 409
         return jsonify(id=cursor.lastrowid), 201
 
+    @app.post("/api/words/<int:word_id>/practice")
+    def practice_word(word_id):
+        db = get_db()
+        cursor = db.execute(
+            "UPDATE collocations SET practice_count = practice_count + 1 "
+            "WHERE id = ? AND next_review_at IS NOT NULL AND next_review_at <= ? "
+            "RETURNING practice_count",
+            (word_id, local_now().isoformat()),
+        )
+        row = cursor.fetchone()
+        cursor.close()
+        if row is not None:
+            return jsonify(practice_count=row["practice_count"])
+        if db.execute("SELECT 1 FROM collocations WHERE id = ?", (word_id,)).fetchone() is None:
+            return jsonify(error="Không tìm thấy từ vựng."), 404
+        return jsonify(error="Từ này không còn đến hạn ôn."), 409
+
     @app.post("/api/words/<int:word_id>/complete")
     def complete_word(word_id):
         cursor = get_db().execute(
-            "UPDATE vocabulary SET repetition_count = 8, next_review_at = NULL WHERE id = ?",
+            "UPDATE collocations SET repetition_level = 8, next_review_at = NULL WHERE id = ?",
             (word_id,),
         )
         if cursor.rowcount == 0:
@@ -229,15 +243,15 @@ def create_app(test_config=None):
     def restart_word(word_id):
         db = get_db()
         word = db.execute(
-            "SELECT repetition_count, next_review_at FROM vocabulary WHERE id = ?",
+            "SELECT repetition_level, next_review_at FROM collocations WHERE id = ?",
             (word_id,),
         ).fetchone()
         if word is None:
             return jsonify(error="Không tìm thấy từ vựng."), 404
-        if word["repetition_count"] != 8 or word["next_review_at"] is not None:
+        if word["repetition_level"] != 8 or word["next_review_at"] is not None:
             return jsonify(error="Chỉ có thể học lại từ đã hoàn thành."), 409
         db.execute(
-            "UPDATE vocabulary SET repetition_count = 0, next_review_at = ? WHERE id = ?",
+            "UPDATE collocations SET repetition_level = 0, next_review_at = ? WHERE id = ?",
             (local_now().isoformat(), word_id),
         )
         return jsonify(success=True)
@@ -245,15 +259,16 @@ def create_app(test_config=None):
     @app.put("/api/words/<int:word_id>")
     def update_word(word_id):
         db = get_db()
-        if db.execute("SELECT 1 FROM vocabulary WHERE id = ?", (word_id,)).fetchone() is None:
+        if db.execute("SELECT 1 FROM collocations WHERE id = ?", (word_id,)).fetchone() is None:
             return jsonify(error="Không tìm thấy từ vựng."), 404
         try:
             data = payload()
-            english = required_text(data, "english", "Từ tiếng Anh")
-            vietnamese = required_text(data, "vietnamese", "Nghĩa tiếng Việt")
+            english = unicodedata.normalize("NFC", required_text(data.get("english"), "Từ tiếng Anh")).lower()
+            vietnamese = required_text(data.get("vietnamese"), "Nghĩa tiếng Việt")
+            reject_duplicate_english(english, word_id)
             db.execute(
-                "UPDATE vocabulary SET english = ?, english_key = ?, vietnamese = ? WHERE id = ?",
-                (english.lower(), english.casefold(), vietnamese.lower(), word_id),
+                "UPDATE collocations SET english = ?, vietnamese = ? WHERE id = ?",
+                (english, vietnamese.lower(), word_id),
             )
         except ValueError as error:
             return jsonify(error=str(error)), 400
@@ -263,7 +278,7 @@ def create_app(test_config=None):
 
     @app.delete("/api/words/<int:word_id>")
     def delete_word(word_id):
-        cursor = get_db().execute("DELETE FROM vocabulary WHERE id = ?", (word_id,))
+        cursor = get_db().execute("DELETE FROM collocations WHERE id = ?", (word_id,))
         if cursor.rowcount == 0:
             return jsonify(error="Không tìm thấy từ vựng."), 404
         return jsonify(success=True)
@@ -275,14 +290,14 @@ def create_app(test_config=None):
             return jsonify(error="Chế độ quiz không hợp lệ."), 400
         db = get_db()
         words = db.execute(
-            "SELECT id, english, vietnamese FROM vocabulary ORDER BY id"
+            "SELECT id, english, vietnamese FROM collocations ORDER BY id"
         ).fetchall()
         if len(words) < 8:
             return jsonify(error="Cần ít nhất 8 từ tiếng Anh trong danh sách để bắt đầu quiz."), 400
 
         now = local_now().isoformat()
         due_words = db.execute(
-            "SELECT id, english, vietnamese, repetition_count FROM vocabulary "
+            "SELECT id, english, vietnamese, repetition_level FROM collocations "
             "WHERE next_review_at IS NOT NULL AND next_review_at <= ? ORDER BY id",
             (now,),
         ).fetchall()
@@ -300,7 +315,7 @@ def create_app(test_config=None):
             questions.append({
                 "word_id": word["id"],
                 "prompt": prompt,
-                "repetition_count_after_correct": min(word["repetition_count"] + 1, 8),
+                "repetition_level_after_correct": min(word["repetition_level"] + 1, 8),
                 "choices": [{"id": choice["id"], "text": choice[choice_key]} for choice in choices],
             })
         random.shuffle(questions)
@@ -335,7 +350,7 @@ def create_app(test_config=None):
         db = get_db()
         placeholders = ",".join("?" for _ in choice_ids)
         rows = db.execute(
-            f"SELECT id, vietnamese, repetition_count, next_review_at FROM vocabulary WHERE id IN ({placeholders})",
+            f"SELECT id, vietnamese, repetition_level, next_review_at FROM collocations WHERE id IN ({placeholders})",
             choice_ids,
         ).fetchall()
         by_id = {row["id"]: row for row in rows}
@@ -352,24 +367,24 @@ def create_app(test_config=None):
             if normalize_meaning(by_id[choice_id]["vietnamese"]) == normalize_meaning(target["vietnamese"])
         ]
         is_correct = selected_id in correct_ids
-        if is_correct and target["repetition_count"] == 7:
+        if is_correct and target["repetition_level"] == 7:
             new_count = 8
             next_review_at = None
         elif is_correct:
-            new_count = target["repetition_count"] + 1
+            new_count = target["repetition_level"] + 1
             next_review_at = next_review_for_count(new_count, answered_at).isoformat()
         else:
-            new_count = 0
+            new_count = max(target["repetition_level"] - 2, 0)
             next_review_at = (answered_at + timedelta(hours=1)).isoformat()
 
         db.execute(
-            "UPDATE vocabulary SET repetition_count = ?, next_review_at = ? WHERE id = ?",
+            "UPDATE collocations SET repetition_level = ?, next_review_at = ? WHERE id = ?",
             (new_count, next_review_at, word_id),
         )
         return jsonify(
             correct=is_correct,
             correct_option_ids=correct_ids,
-            repetition_count=new_count,
+            repetition_level=new_count,
             next_review_at=next_review_at,
             completed=next_review_at is None,
         )
@@ -380,18 +395,18 @@ def create_app(test_config=None):
         if mode is None:
             return jsonify(error="Chế độ ôn thẻ không hợp lệ."), 400
         rows = get_db().execute(
-            "SELECT id, english, vietnamese, repetition_count FROM vocabulary "
+            "SELECT id, english, vietnamese, repetition_level FROM collocations "
             "WHERE next_review_at IS NOT NULL AND next_review_at <= ? ORDER BY RANDOM()",
             (local_now().isoformat(),),
         ).fetchall()
         if mode == "va":
             cards = [
-                {"word_id": row["id"], "front": row["vietnamese"], "back": row["english"], "repetition_count": row["repetition_count"]}
+                {"word_id": row["id"], "front": row["vietnamese"], "back": row["english"], "repetition_level": row["repetition_level"]}
                 for row in rows
             ]
         else:
             cards = [
-                {"word_id": row["id"], "front": row["english"], "back": row["vietnamese"], "repetition_count": row["repetition_count"]}
+                {"word_id": row["id"], "front": row["english"], "back": row["vietnamese"], "repetition_level": row["repetition_level"]}
                 for row in rows
             ]
         return jsonify(cards=cards)
@@ -422,7 +437,7 @@ def create_app(test_config=None):
 
         db = get_db()
         word = db.execute(
-            "SELECT repetition_count, next_review_at FROM vocabulary WHERE id = ?",
+            "SELECT repetition_level, next_review_at FROM collocations WHERE id = ?",
             (word_id,),
         ).fetchone()
         if word is None:
@@ -432,10 +447,10 @@ def create_app(test_config=None):
             return jsonify(error="Từ này không còn đến hạn ôn."), 409
 
         if result == "wrong":
-            new_count = 0
+            new_count = max(word["repetition_level"] - 2, 0)
             next_review_at = (answered_at + timedelta(hours=1)).isoformat()
         elif result == "relative":
-            new_count = word["repetition_count"]
+            new_count = word["repetition_level"]
             if new_count == 8:
                 next_review_at = None
             elif new_count == 0:
@@ -443,12 +458,12 @@ def create_app(test_config=None):
             else:
                 next_review_at = next_review_for_count(new_count, answered_at).isoformat()
         elif result == "timeout":
-            new_count = max(word["repetition_count"] - 1, 0)
+            new_count = max(word["repetition_level"] - 1, 0)
             next_review_at = (answered_at + timedelta(hours=1)).isoformat()
         else:
             elapsed = response_time_ms / 1000
             change = 2 if elapsed <= 2 else 1 if elapsed <= 5 else 0 if elapsed <= 10 else -1
-            new_count = min(max(word["repetition_count"] + change, 0), 8)
+            new_count = min(max(word["repetition_level"] + change, 0), 8)
             if new_count == 8:
                 next_review_at = None
             elif new_count == 0:
@@ -457,11 +472,11 @@ def create_app(test_config=None):
                 next_review_at = next_review_for_count(new_count, answered_at).isoformat()
 
         db.execute(
-            "UPDATE vocabulary SET repetition_count = ?, next_review_at = ? WHERE id = ?",
+            "UPDATE collocations SET repetition_level = ?, next_review_at = ? WHERE id = ?",
             (new_count, next_review_at, word_id),
         )
         return jsonify(
-            repetition_count=new_count,
+            repetition_level=new_count,
             next_review_at=next_review_at,
             completed=next_review_at is None,
         )

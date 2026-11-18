@@ -3,16 +3,16 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Học từ vựng</title>
+  <title>Học cụm từ</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
   <script src="{{ url_for('static', filename='app.js') }}" defer></script>
 </head>
 <body>
   <main class="container">
     <header>
-      <h1>Học từ vựng</h1>
+      <h1>Học cụm từ</h1>
       <nav aria-label="Điều hướng chính">
-        <button id="list-tab" class="tab active" type="button">Danh sách từ</button>
+        <button id="list-tab" class="tab active" type="button">Danh sách cụm từ</button>
         <button id="quiz-tab" class="tab" type="button">Ôn trắc nghiệm</button>
         <button id="flashcard-tab" class="tab" type="button">Ôn lật thẻ</button>
       </nav>
@@ -22,14 +22,14 @@
 
     <section id="list-view">
       <div class="section-heading">
-        <h2>Danh sách từ</h2>
-        <button id="add-word" class="primary" type="button">Thêm từ</button>
+        <h2>Danh sách cụm từ</h2>
+        <button id="add-word" class="primary" type="button">Thêm cụm từ</button>
       </div>
       <div class="filters">
         <label class="search-label">Tìm kiếm
-          <input id="search" type="search" placeholder="Từ tiếng Anh hoặc nghĩa tiếng Việt">
+          <input id="search" type="search" placeholder="Cụm từ tiếng Anh hoặc nghĩa tiếng Việt">
         </label>
-        <label>Lọc theo trạng thái
+        <label>Lọc theo lịch ôn
           <select id="status-filter">
             <option value="all">Tất cả</option>
             <option value="due">Đến hạn</option>
@@ -40,16 +40,20 @@
       <div class="table-wrap">
         <table>
           <colgroup>
+            <col class="number-column">
             <col class="english-column">
             <col class="vietnamese-column">
             <col class="stage-column">
+            <col class="practice-column">
             <col class="review-column">
             <col class="actions-column">
           </colgroup>
           <thead>
             <tr>
+              <th scope="col">STT</th>
               <th scope="col">Tiếng Anh</th>
               <th scope="col">Nghĩa tiếng Việt</th>
+              <th scope="col">Mức thông thạo</th>
               <th scope="col">Số lần ôn</th>
               <th scope="col">Thời điểm ôn tiếp theo</th>
               <th scope="col"><span class="sr-only">Thao tác</span></th>
@@ -122,8 +126,8 @@
 
   <dialog id="word-dialog">
     <form id="word-form">
-      <h2 id="dialog-title">Thêm từ</h2>
-      <label>Từ tiếng Anh
+      <h2 id="dialog-title">Thêm cụm từ</h2>
+      <label>Cụm từ tiếng Anh
         <input name="english" maxlength="500" required autocomplete="off">
       </label>
       <label>Nghĩa tiếng Việt
