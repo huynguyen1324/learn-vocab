@@ -369,7 +369,7 @@ async function answerFlashcard(result, elapsed = null) {
 
 function flipFlashcard(automatic = false) {
   if (flashcards.flippedAt !== null) return;
-  const elapsed = Math.round(performance.now() - flashcards.startedAt);
+  const elapsed = performance.now() - flashcards.startedAt;
   automatic = automatic || elapsed > 20000;
   flashcards.flippedAt = automatic ? 20000 : elapsed;
   stopFlashcardTimer();
@@ -378,7 +378,7 @@ function flipFlashcard(automatic = false) {
   document.querySelector("#flashcard-correct").disabled = automatic;
   document.querySelector("#flashcard-wrong").disabled = automatic;
   document.querySelector("#flashcard-relative").disabled = automatic;
-  document.querySelector("#flashcard-known").disabled = automatic;
+  document.querySelector("#flashcard-known").disabled = automatic || elapsed > 2000;
   if (automatic) answerFlashcard("timeout");
 }
 

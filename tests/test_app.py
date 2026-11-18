@@ -374,7 +374,7 @@ class VocabularyAppTests(unittest.TestCase):
         cases = [
             (1500, 3, 5), (2000, 3, 5), (2001, 3, 4),
             (5000, 3, 4), (5001, 3, 3), (10000, 3, 3),
-            (10001, 3, 2), (20000, 3, 3),
+            (10001, 3, 2), (20000, 3, 2),
         ]
         for elapsed, starting_count, expected_count in cases:
             word_id = self.insert_word(f"word-{elapsed}-{starting_count}", "nghĩa", repetition_count=starting_count)

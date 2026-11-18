@@ -6,6 +6,8 @@
 
 ```powershell
 python -m pip install -r requirements.txt
+# Chỉ cần khi chưa có config.json; không ghi đè cấu hình đang dùng.
+Copy-Item config.example.json config.json
 python app.py
 ```
 
@@ -41,7 +43,7 @@ python migrate_lowercase.py
 python import_vocab.py
 ```
 
-Importer ghép các dòng không rỗng theo cặp (tiếng Anh rồi nghĩa tiếng Việt), giữ nguyên nội dung từng dòng và đặt từ mới đến hạn ngay. Chạy lại sẽ bỏ qua từ đã có mà không ghi đè tiến độ.
+Importer cũ ghép các dòng không rỗng theo cặp (tiếng Anh rồi nghĩa tiếng Việt), bỏ khoảng trắng đầu/cuối, lưu chữ thường và đặt từ mới đến hạn ngay. Chạy lại bỏ qua từ đã có mà không ghi đè tiến độ. Script này vẫn được giữ để nhập không qua AI.
 
 Ví dụ thêm một từ mới bằng SQL:
 
