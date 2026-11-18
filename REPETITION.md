@@ -1,8 +1,8 @@
-- Lần 1: Ôn từ mới
-- Lần 2: Sau 1 giờ
-- Lần 3: Sau 1 ngày
-- Lần 4: Sau 3 ngày
-- Lần 5: Sau 1 tuần
-- Lần 6: Sau 1 tháng
-- Lần 7: Sau 3 tháng
-- Lần 8: Sau 1 năm
+- Để đạt mốc 1: Ôn lần đầu
+- Để đạt mốc 2: Ôn sau 1 giờ
+- Để đạt mốc 3: Ôn sau 1 ngày
+- Để đạt mốc 4: Ôn sau 3 ngày
+- Để đạt mốc 5: Ôn sau 1 tuần
+- Để đạt mốc 6: Ôn sau 1 tháng
+- Để đạt mốc 7: Ôn sau 3 tháng
+- Để đạt mốc hoàn thành: Ôn sau 1 năm
