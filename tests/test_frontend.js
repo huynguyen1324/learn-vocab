@@ -27,6 +27,10 @@ class Element {
       toggle: (name, force) => force ? classes.add(name) : classes.delete(name),
     };
   }
+  reset() {}
+  focus() {}
+  showModal() { this.hidden = false; }
+  close() { this.hidden = true; }
   append(...items) { this.children.push(...items); }
   replaceChildren(...items) { this.children = items; }
   setAttribute(name, value) { this.attributes[name] = value; }
@@ -51,6 +55,8 @@ function setup() {
     assert.ok(elements.has(`#${id}`), `Missing HTML element: ${id}`);
     return elements.get(`#${id}`);
   };
+  el("word-form").elements = { english: new Element(), vietnamese: new Element() };
+  const headers = [...html.matchAll(/<th[^>]*data-sort="([^"]+)"/g)].map(match => { const header = new Element(); header.dataset.sort = match[1]; return header; });
   const requests = [];
   const timers = new Map();
   let now = 0;
@@ -62,6 +68,7 @@ function setup() {
         return elements.get(selector);
       },
       querySelectorAll: (selector) => {
+        if (selector === "th[data-sort]") return headers;
         assert.equal(selector, "#choices .choice");
         return el("choices").children;
       },
@@ -86,7 +93,7 @@ function setup() {
     now += milliseconds;
     for (const callback of [...timers.values()]) callback();
   };
-  return { el, run, requests, timers, tick };
+  return { el, run, requests, timers, tick, headers };
 }
 
 const flush = async () => { for (let i = 0; i < 10; i++) await Promise.resolve(); };
@@ -100,7 +107,7 @@ const questions = [{
 }];
 
 async function settleDisplay(h, promise, data) {
-  h.requests.at(-1).respond(data);
+  h.requests.at(-1).respond({ round_id: "round-1", ...data });
   await flush();
   assert.match(h.requests.at(-1).url, /^\/api\/words\/\d+\/practice$/);
   h.requests.at(-1).respond({ practice_count: 1 });
@@ -156,7 +163,7 @@ test("timeout failure retries the same card/result through Next", async () => {
   assert.equal(h.el("flashcard-back").hidden, false);
   assert.equal(h.el("flashcard-known").disabled, true);
   const first = h.requests.at(-1);
-  assert.deepEqual(JSON.parse(first.options.body), { word_id: 1, result: "timeout" });
+  assert.deepEqual(JSON.parse(first.options.body), { word_id: 1, round_id: "round-1", result: "timeout", response_time_ms: 15000 });
   assert.equal(h.el("start-flashcard-av").disabled, true);
   first.respond({ error: "offline" }, false);
   await flush();
@@ -245,7 +252,7 @@ test("manual correct retains flip latency and can retry a network failure", asyn
   h.run("flipFlashcard()");
   const promise = h.run('answerFlashcard("correct", flashcards.flippedAt)');
   const first = h.requests.at(-1);
-  assert.deepEqual(JSON.parse(first.options.body), { word_id: 1, result: "correct", response_time_ms: 1250 });
+  assert.deepEqual(JSON.parse(first.options.body), { word_id: 1, round_id: "round-1", result: "correct", response_time_ms: 1250 });
   first.reject(new Error("network down"));
   await promise;
   assert.equal(h.el("flashcard-correct").disabled, false);
@@ -366,7 +373,7 @@ for (const type of ["quiz", "flashcard"]) {
         await h.run("submitAnswer(1)");
       } else {
         assert.equal(h.el("flashcard").disabled, true);
-        assert.equal(h.timers.size, 1, "timer starts on display/dispatch");
+        assert.equal(h.timers.size, 0, "timer waits for practice acknowledgement");
         h.run("flipFlashcard()");
         await h.run('answerFlashcard("wrong")');
       }
@@ -453,24 +460,15 @@ test("flashcards count each shown front once, never flips, answers, retries or e
   assert.equal(h.timers.size, 0);
 });
 
-test("flashcard clock starts on displayed front, not delayed practice acknowledgement", async () => {
+test("flashcard clock excludes delayed practice acknowledgement", async () => {
   const h = setup();
-  h.run('showView("flashcard")');
   const pending = h.run('startFlashcards("av")');
-  h.tick(5000);
-  h.requests.at(-1).respond({ cards });
-  await flush();
-  assert.equal(h.run("flashcards.startedAt"), 5000, "batch loading time is excluded");
-  h.tick(21000);
-  assert.equal(h.requests.at(-1).url, "/api/words/1/practice", "timeout answer waits for persistence");
-  h.requests.at(-1).respond({ practice_count: 1 });
-  await pending;
-  h.tick(50);
-  assert.equal(h.requests.at(-1).url, "/api/flashcard/answer");
-  assert.deepEqual(JSON.parse(h.requests.at(-1).options.body), { word_id: 1, result: "timeout" });
-  assert.equal(practiceRequests(h).length, 1);
-  h.requests.at(-1).respond({});
-  await flush();
+  h.requests.at(-1).respond({ cards, round_id: "round-1" }); await flush();
+  h.tick(21000); assert.equal(h.timers.size, 0);
+  h.requests.at(-1).respond({}); await pending;
+  assert.equal(h.run("flashcards.startedAt"), 21000);
+  h.tick(15000); assert.equal(h.requests.at(-1).url, "/api/words/1/practice");
+  h.tick(1); assert.equal(h.requests.at(-1).url, "/api/flashcard/answer");
 });
 
 test("phrase list has filtered numbering, mastery, practice count, warning threshold and seven-column empty state", async () => {
@@ -492,6 +490,64 @@ test("phrase list has filtered numbering, mastery, practice count, warning thres
   assert.equal(h.el("word-list").children[0].children[0].colSpan, 7);
   assert.match(html, /Danh sách cụm từ/);
   assert.match(html, /Mức thông thạo/);
+});
+
+test("add and edit forms save without removed checkbox", async () => {
+  for (const editing of [false, true]) {
+    const h = setup();
+    h.run(editing ? 'openWordDialog({id: 4, english: "one", vietnamese: "mot"})' : 'openWordDialog()');
+    h.el("word-form").elements.english.value = "new";
+    h.el("word-form").elements.vietnamese.value = "moi";
+    const saving = h.el("word-form").fire("submit");
+    const request = h.requests.at(-1);
+    assert.equal(request.options.method, editing ? "PUT" : "POST");
+    assert.deepEqual(JSON.parse(request.options.body), {english: "new", vietnamese: "moi"});
+    request.respond({}); await flush();
+    h.requests.at(-1).respond({words: []}); await saving;
+    assert.equal(h.el("word-dialog").hidden, true);
+  }
+});
+
+test("sortable headers dispatch selected sort", async () => {
+  const h = setup(); await h.headers[0].fire("click");
+  assert.match(h.requests.at(-1).url, /sort_by=english_desc/);
+});
+
+test("quiz boundaries retain time, exclude API wait, and safely retry frozen answers", async () => {
+  for (const elapsed of [3000, 3001, 7000, 7001, 15000, 15001]) {
+    const h = setup();
+    const start = h.run('startQuiz("av")');
+    h.requests.at(-1).respond({questions, round_id: "round-1"}); await flush();
+    h.tick(20000); assert.equal(h.timers.size, 0);
+    h.requests.at(-1).respond({}); await start;
+    assert.equal(JSON.parse(h.requests.at(-1).options.body).round_id, "round-1");
+    h.tick(elapsed);
+    const pending = elapsed <= 15000 ? h.run("submitAnswer(1)") : null;
+    const request = h.requests.at(-1);
+    const payload = JSON.parse(request.options.body);
+    assert.equal(payload.response_time_ms, Math.min(elapsed, 15000));
+    assert.equal(payload.selected_id, elapsed > 15000 ? null : 1);
+    assert.equal(payload.result, elapsed > 15000 ? "timeout" : undefined);
+    assert.equal(h.el("choices").children.every(button => button.disabled), true);
+    request.respond({error: "offline"}, false); if (pending) await pending; else await flush();
+    assert.equal(h.run("quiz.saved"), false);
+    await h.el("next-question").fire("click");
+    assert.equal(h.requests.at(-1).options.body, request.options.body);
+    h.requests.at(-1).respond({correct: false, correct_option_ids: [1]}); await flush();
+    assert.equal(h.run("quiz.saved"), true);
+    assert.equal(h.run("quiz.index"), 0);
+  }
+});
+
+test("flashcard flip boundaries send retained times for all self ratings", async () => {
+  for (const elapsed of [3000, 3001, 7000, 7001, 15000]) {
+    for (const result of ["correct", "wrong", "relative"]) {
+      const h = setup(); await startFlash(h); h.tick(elapsed); h.run("flipFlashcard()");
+      const pending = h.run(`answerFlashcard("${result}")`);
+      assert.equal(JSON.parse(h.requests.at(-1).options.body).response_time_ms, elapsed);
+      h.requests.at(-1).respond({}); await pending;
+    }
+  }
 });
 
 (async () => {

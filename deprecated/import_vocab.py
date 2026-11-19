@@ -35,7 +35,7 @@ def import_vocabulary(input_path=INPUT_PATH, database_path=DATABASE_PATH):
         with connection:
             connection.executemany(
                 "INSERT INTO vocabulary "
-                "(english, english_key, vietnamese, repetition_count, next_review_at) "
+                "(english, english_key, vietnamese, repetition_level, next_review_at) "
                 "VALUES (?, ?, ?, 0, ?) "
                 "ON CONFLICT(english_key) DO NOTHING",
                 [(english.lower(), english.casefold(), vietnamese.lower(), now) for english, vietnamese in entries],

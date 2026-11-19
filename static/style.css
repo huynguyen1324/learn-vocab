@@ -288,16 +288,16 @@ dialog form {
   background: #e8edf2;
 }
 
-#flashcard-progress-fill {
+.flashcard-progress > div {
   width: 0;
   height: 100%;
   transition: width 50ms linear;
 }
 
-#flashcard-progress-fill[data-band="fast"] { background: #2b7a46; }
-#flashcard-progress-fill[data-band="medium"] { background: #d89b00; }
-#flashcard-progress-fill[data-band="slow"] { background: #ed7d21; }
-#flashcard-progress-fill[data-band="late"] { background: #c9372c; }
+.flashcard-progress > div[data-band="fast"] { background: #2b7a46; }
+.flashcard-progress > div[data-band="medium"] { background: #d89b00; }
+.flashcard-progress > div[data-band="slow"] { background: #ed7d21; }
+.flashcard-progress > div[data-band="late"] { background: #c9372c; }
 
 .flashcard {
   display: grid;

@@ -51,11 +51,11 @@
           <thead>
             <tr>
               <th scope="col">STT</th>
-              <th scope="col">Tiếng Anh</th>
+              <th scope="col" data-sort="english" class="sortable">Tiếng Anh</th>
               <th scope="col">Nghĩa tiếng Việt</th>
-              <th scope="col">Mức thông thạo</th>
-              <th scope="col">Số lần ôn</th>
-              <th scope="col">Thời điểm ôn tiếp theo</th>
+              <th scope="col" data-sort="repetition_level" class="sortable">Mức thông thạo</th>
+              <th scope="col" data-sort="practice_count" class="sortable">Số lần ôn</th>
+              <th scope="col" data-sort="next_review_at" class="sortable">Thời điểm ôn tiếp theo</th>
               <th scope="col"><span class="sr-only">Thao tác</span></th>
             </tr>
           </thead>
@@ -80,6 +80,9 @@
           <p id="question-count" class="muted"></p>
           <h3 id="question-prompt"></h3>
           <p id="question-stage" class="muted"></p>
+          <div id="quiz-progress" class="flashcard-progress" role="progressbar" aria-label="Thời gian trả lời" aria-valuemin="0" aria-valuemax="15000" aria-valuenow="0">
+            <div id="quiz-progress-fill"></div>
+          </div>
         </section>
         <section class="answer-panel" aria-label="Các lựa chọn">
           <div id="choices" class="choices"></div>
@@ -105,7 +108,7 @@
       <div id="flashcard-panel" class="quiz-panel" hidden>
         <p id="flashcard-count" class="muted"></p>
         <p id="flashcard-stage" class="muted"></p>
-        <div id="flashcard-progress" class="flashcard-progress" role="progressbar" aria-label="Thời gian trả lời" aria-valuemin="0" aria-valuemax="20000" aria-valuenow="0">
+        <div id="flashcard-progress" class="flashcard-progress" role="progressbar" aria-label="Thời gian trả lời" aria-valuemin="0" aria-valuemax="15000" aria-valuenow="0">
           <div id="flashcard-progress-fill"></div>
         </div>
         <button id="flashcard" class="flashcard" type="button" aria-label="Lật thẻ">
@@ -132,10 +135,6 @@
       </label>
       <label>Nghĩa tiếng Việt
         <input name="vietnamese" maxlength="500" required autocomplete="off">
-      </label>
-      <label id="complete-option-label" class="checkbox-label">
-        <input id="complete-option" name="complete" type="checkbox">
-        Đánh dấu hoàn thành ngay
       </label>
       <p id="form-error" class="error" role="alert"></p>
       <div class="dialog-actions">

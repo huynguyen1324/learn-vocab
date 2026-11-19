@@ -13,7 +13,7 @@ DATABASE_PATH = ROOT / "instance" / "vocabulary.sqlite3"
 
 
 def migrate_lowercase(database_path=DATABASE_PATH):
-    # create_app applies the stage-to-repetition_count schema migration first.
+    # create_app applies the stage-to-repetition_level schema migration first.
     create_app({"DATABASE": str(database_path)})
     connection = sqlite3.connect(database_path)
     try:

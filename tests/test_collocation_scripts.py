@@ -27,7 +27,7 @@ class CollocationScriptTests(unittest.TestCase):
         root = Path(__file__).resolve().parents[1]
         self.assertEqual(export_vocabulary.__defaults__, (root / "instance" / "vocabulary.sqlite3", root / "tools" / "input_vocab.txt"))
         self.assertEqual(import_collocations.__defaults__, (root / "tools" / "output_collocations.txt", root / "instance" / "vocabulary.sqlite3"))
-        self.assertEqual(generate_collocations.__defaults__, (root / "tools" / "input_vocab.txt", root / "tools" / "output_collocations.txt", root / "config.json"))
+        self.assertEqual(generate_collocations.__defaults__, (root / "tools" / "input_vocab.txt", root / "tools" / "output_collocations.txt", root / "config.json", root / "USER_DESCRIPTION.md"))
 
     def test_waiting_log_reports_elapsed_and_stops_on_success_or_error(self):
         for fail in (False, True):

@@ -5,6 +5,7 @@ const wordForm = document.querySelector("#word-form");
 const formError = document.querySelector("#form-error");
 let words = [];
 let editingId = null;
+let currentSortBy = "english";
 
 let wordRequest = 0;
 
@@ -101,6 +102,7 @@ async function loadWords() {
   const params = new URLSearchParams({
     q: document.querySelector("#search").value,
     status: document.querySelector("#status-filter").value,
+    sort_by: currentSortBy,
   });
   try {
     const data = await api(`/api/words?${params}`);
@@ -115,8 +117,6 @@ function openWordDialog(word = null) {
   wordForm.reset();
   formError.textContent = "";
   document.querySelector("#dialog-title").textContent = word ? "Sửa cụm từ" : "Thêm cụm từ";
-  document.querySelector("#complete-option-label").hidden = Boolean(word);
-  document.querySelector("#complete-option").checked = false;
   wordForm.elements.english.value = word ? word.english : "";
   wordForm.elements.vietnamese.value = word ? word.vietnamese : "";
   wordDialog.showModal();
@@ -133,7 +133,6 @@ wordForm.addEventListener("submit", async (event) => {
     english: wordForm.elements.english.value,
     vietnamese: wordForm.elements.vietnamese.value,
   };
-  if (!editingId) data.complete = document.querySelector("#complete-option").checked;
   try {
     await api(editingId ? `/api/words/${editingId}` : "/api/words", {
       method: editingId ? "PUT" : "POST",
@@ -179,11 +178,37 @@ document.querySelector("#status-filter").addEventListener("change", () => {
   loadWords().catch((error) => showNotice(error.message, true));
 });
 
+// Add click handlers for sortable table headers
+const tableHeaders = document.querySelectorAll("th[data-sort]");
+tableHeaders.forEach(header => {
+  header.addEventListener("click", () => {
+    const sortBy = header.dataset.sort;
+
+    // Extract the base column name (remove _desc if present)
+    const currentBase = currentSortBy.replace("_desc", "");
+
+    if (currentBase === sortBy) {
+      // Same column, toggle descending
+      if (currentSortBy.endsWith("_desc")) {
+        currentSortBy = sortBy;
+      } else {
+        currentSortBy = sortBy + "_desc";
+      }
+    } else {
+      // Different column, start with ascending
+      currentSortBy = sortBy;
+    }
+
+    loadWords().catch((error) => showNotice(error.message, true));
+  });
+});
+
 function showView(view) {
   const isList = view === "list";
   const isQuiz = view === "quiz";
   const isFlashcard = view === "flashcard";
   if (!isQuiz) {
+    stopQuizTimer();
     quiz.generation += 1;
     quiz.questions = [];
     document.querySelector("#quiz-panel").hidden = true;
@@ -212,9 +237,26 @@ const quiz = {
   pending: false,
   generation: 0,
   displayReady: false,
+  timer: null, startedAt: 0, saved: false, retryAnswer: null, roundId: null,
 };
 
+function stopQuizTimer() {
+  clearInterval(quiz.timer);
+  quiz.timer = null;
+}
+
+function paintProgress(id, elapsed) {
+  const progress = Math.min(elapsed / 15000, 1);
+  document.querySelector(`#${id}-progress-fill`).style.width = `${progress * 100}%`;
+  document.querySelector(`#${id}-progress`).setAttribute("aria-valuenow", String(Math.round(progress * 15000)));
+  document.querySelector(`#${id}-progress-fill`).dataset.band = elapsed <= 3000 ? "fast" : elapsed <= 7000 ? "medium" : "slow";
+}
+
 async function renderQuestion() {
+  stopQuizTimer();
+  quiz.saved = false;
+  quiz.retryAnswer = null;
+  paintProgress("quiz", 0);
   const panel = document.querySelector("#quiz-panel");
   const count = document.querySelector("#question-count");
   const prompt = document.querySelector("#question-prompt");
@@ -239,13 +281,14 @@ async function renderQuestion() {
   const question = quiz.questions[quiz.index];
   count.textContent = `Câu ${quiz.index + 1}/${quiz.questions.length}`;
   prompt.textContent = question.prompt;
-  stage.textContent = `Mức thông thạo sau khi trả lời đúng: ${question.repetition_level_after_correct}/8`;
+  stage.textContent = "Đúng: ≤3 giây +2 mức; ≤7 giây +1; ≤15 giây giữ mức. Sai/hết giờ: −1.";
   choices.replaceChildren();
   feedback.textContent = "";
   markComplete.hidden = true;
   markComplete.disabled = false;
   markComplete.textContent = "Đánh dấu hoàn thành";
   next.hidden = true;
+  next.textContent = "Tiếp theo";
   quiz.answering = false;
   for (const choice of question.choices) {
     const button = document.createElement("button");
@@ -262,10 +305,16 @@ async function renderQuestion() {
   const generation = quiz.generation;
   setRoundPending(quiz, "quiz", true);
   try {
-    await api(`/api/words/${question.word_id}/practice`, { method: "POST" });
+    await api(`/api/words/${question.word_id}/practice`, { method: "POST", body: JSON.stringify({ round_id: quiz.roundId }) });
     if (generation !== quiz.generation) return;
     quiz.displayReady = true;
     for (const button of choices.children) button.disabled = false;
+    quiz.startedAt = performance.now();
+    quiz.timer = setInterval(() => {
+      const elapsed = performance.now() - quiz.startedAt;
+      paintProgress("quiz", elapsed);
+      if (elapsed > 15000) submitAnswer(null);
+    }, 50);
   } catch (error) {
     if (generation !== quiz.generation) return;
     feedback.textContent = `${error.message} Không thể xác nhận số lần ôn. Hãy bắt đầu lại lượt ôn; yêu cầu này sẽ không tự thử lại.`;
@@ -276,20 +325,27 @@ async function renderQuestion() {
 
 async function submitAnswer(selectedId) {
   if (quiz.pending || !quiz.displayReady || quiz.answering || !quiz.questions[quiz.index]) return;
+  const elapsed = performance.now() - quiz.startedAt;
+  const timeout = selectedId === null || elapsed > 15000;
+  const payload = quiz.retryAnswer || { word_id: quiz.questions[quiz.index].word_id, round_id: quiz.roundId, selected_id: timeout ? null : selectedId, response_time_ms: timeout ? 15000 : Math.min(Math.round(elapsed), 15000), choice_ids: quiz.questions[quiz.index].choices.map(choice => choice.id), ...(timeout ? { result: "timeout" } : {}) };
+  quiz.retryAnswer = payload;
   quiz.answering = true;
+  stopQuizTimer();
+  for (const button of document.querySelectorAll("#choices .choice")) button.disabled = true;
   setRoundPending(quiz, "quiz", true);
   const generation = quiz.generation;
   const question = quiz.questions[quiz.index];
-  const choiceIds = question.choices.map((choice) => choice.id);
   const feedback = document.querySelector("#feedback");
   const markComplete = document.querySelector("#mark-complete");
   const next = document.querySelector("#next-question");
   try {
     const result = await api(`/api/quiz/answer?mode=${quiz.mode}`, {
       method: "POST",
-      body: JSON.stringify({ word_id: question.word_id, selected_id: selectedId, choice_ids: choiceIds }),
+      body: JSON.stringify(payload),
     });
     if (generation !== quiz.generation) return;
+    quiz.saved = true;
+    quiz.retryAnswer = null;
     if (result.correct) quiz.correct += 1;
     for (const button of document.querySelectorAll("#choices .choice")) {
       const id = Number(button.dataset.id);
@@ -305,10 +361,13 @@ async function submitAnswer(selectedId) {
       : `Chưa chính xác. Đáp án đúng: ${correctWords.join(", ")}.`;
     markComplete.hidden = !result.correct || result.completed;
     next.hidden = false;
+    next.textContent = "Tiếp theo";
   } catch (error) {
     if (generation !== quiz.generation) return;
     quiz.answering = false;
-    feedback.textContent = error.message;
+    feedback.textContent = `${error.message} Kết quả chưa lưu. Thử lại để tiếp tục.`;
+    next.hidden = false;
+    next.textContent = "Thử lại";
   } finally {
     setRoundPending(quiz, "quiz", false);
   }
@@ -316,6 +375,8 @@ async function submitAnswer(selectedId) {
 
 async function startQuiz(mode) {
   if (quiz.pending) return;
+  resetFlashcards();
+  stopQuizTimer();
   setRoundPending(quiz, "quiz", true);
   const generation = ++quiz.generation;
   document.querySelector("#quiz-panel").hidden = true;
@@ -324,6 +385,7 @@ async function startQuiz(mode) {
   try {
     const data = await api(`/api/quiz/start?mode=${mode}`, { method: "POST" });
     if (generation !== quiz.generation) return;
+    quiz.roundId = data.round_id;
     quiz.questions = data.questions;
     quiz.index = 0;
     quiz.correct = 0;
@@ -345,19 +407,21 @@ async function startQuiz(mode) {
 document.querySelector("#start-quiz-av").addEventListener("click", () => startQuiz("av"));
 document.querySelector("#start-quiz-va").addEventListener("click", () => startQuiz("va"));
 document.querySelector("#next-question").addEventListener("click", () => {
-  if (quiz.pending || !quiz.displayReady || !quiz.answering || !quiz.questions.length) return;
+  if (quiz.pending || !quiz.displayReady || !quiz.questions.length) return;
+  if (quiz.retryAnswer) { submitAnswer(quiz.retryAnswer.selected_id); return; }
+  if (!quiz.saved) return;
   quiz.index += 1;
   renderQuestion();
 });
 document.querySelector("#mark-complete").addEventListener("click", async (event) => {
-  if (quiz.pending || !quiz.questions[quiz.index]) return;
+  if (quiz.pending || !quiz.saved || !quiz.questions[quiz.index]) return;
   const button = event.currentTarget;
   const question = quiz.questions[quiz.index];
   const generation = quiz.generation;
   setRoundPending(quiz, "quiz", true);
   button.disabled = true;
   try {
-    await api(`/api/words/${question.word_id}/complete`, { method: "POST" });
+    await api(`/api/words/${question.word_id}/complete`, { method: "POST", body: JSON.stringify({ round_id: quiz.roundId }) });
     if (generation !== quiz.generation) return;
     button.textContent = "Đã đánh dấu hoàn thành";
     document.querySelector("#feedback").textContent += " Cụm từ đã được đánh dấu hoàn thành.";
@@ -393,14 +457,13 @@ function resetFlashcards() {
 }
 
 function paintFlashcardProgress(elapsed) {
-  const progress = Math.min(elapsed / 20, 1);
-  flashcardFill.style.width = `${progress * 100}%`;
-  document.querySelector("#flashcard-progress").setAttribute("aria-valuenow", String(Math.round(progress * 20000)));
-  flashcardFill.dataset.band = elapsed <= 3 ? "fast" : elapsed <= 5 ? "medium" : elapsed <= 15 ? "slow" : "late";
+  paintProgress("flashcard", elapsed * 1000);
 }
 
 async function answerFlashcard(result, elapsed = null) {
   if (flashcards.pending || !flashcards.displayReady || flashcards.answered || !flashcards.cards[flashcards.index]) return;
+  if (flashcards.flippedAt === null || (result === "known" && flashcards.flippedAt > 2000) || (flashcards.retryTimeout && result !== "timeout")) return;
+  elapsed = result === "timeout" ? 15000 : Math.min(Math.round(flashcards.flippedAt), 15000);
   flashcards.answered = true;
   setRoundPending(flashcards, "flashcard", true);
   const generation = flashcards.generation;
@@ -409,12 +472,13 @@ async function answerFlashcard(result, elapsed = null) {
   const card = flashcards.cards[flashcards.index];
   try {
     if (result === "known") {
-      await api(`/api/words/${card.word_id}/complete`, { method: "POST" });
+      await api(`/api/words/${card.word_id}/complete`, { method: "POST", body: JSON.stringify({ round_id: flashcards.roundId, response_time_ms: elapsed }) });
     } else {
       await api("/api/flashcard/answer", {
         method: "POST",
         body: JSON.stringify({
           word_id: card.word_id,
+          round_id: flashcards.roundId,
           result,
           ...(elapsed === null ? {} : { response_time_ms: elapsed }),
         }),
@@ -424,7 +488,7 @@ async function answerFlashcard(result, elapsed = null) {
     flashcards.retryTimeout = false;
     document.querySelector("#flashcard-next").textContent = "Tiếp theo";
     const messages = {
-      timeout: "Quá 20 giây: đã tự lật thẻ và trừ 1 mốc ôn.",
+      timeout: "Quá 15 giây: đã tự lật thẻ và trừ 1 mốc ôn.",
       relative: "Đã lưu. Mốc ôn giữ nguyên, lịch ôn được dời theo mốc hiện tại.",
       correct: "Đã lưu kết quả nhớ đúng.",
       wrong: "Đã lưu kết quả nhớ sai.",
@@ -453,8 +517,8 @@ async function answerFlashcard(result, elapsed = null) {
 function flipFlashcard(automatic = false) {
   if (flashcards.pending || !flashcards.displayReady || !flashcards.cards[flashcards.index] || flashcards.flippedAt !== null) return;
   const elapsed = performance.now() - flashcards.startedAt;
-  automatic = automatic || elapsed > 20000;
-  flashcards.flippedAt = automatic ? 20000 : elapsed;
+  automatic = automatic || elapsed > 15000;
+  flashcards.flippedAt = automatic ? 15000 : elapsed;
   stopFlashcardTimer();
   flashcardButton.classList.add("flipped");
   document.querySelector("#flashcard-back").hidden = false;
@@ -462,7 +526,8 @@ function flipFlashcard(automatic = false) {
   document.querySelector("#flashcard-wrong").disabled = automatic;
   document.querySelector("#flashcard-relative").disabled = automatic;
   document.querySelector("#flashcard-known").disabled = automatic || elapsed > 2000;
-  if (automatic) answerFlashcard("timeout");
+  paintProgress("flashcard", flashcards.flippedAt);
+  if (automatic) { flashcards.retryTimeout = true; answerFlashcard("timeout"); }
 }
 
 async function renderFlashcard() {
@@ -510,18 +575,17 @@ async function renderFlashcard() {
   const generation = flashcards.generation;
   setRoundPending(flashcards, "flashcard", true);
   panel.hidden = false;
-  flashcards.startedAt = performance.now();
-  const practice = api(`/api/words/${card.word_id}/practice`, { method: "POST" });
-  flashcards.timer = setInterval(() => {
-    const elapsed = (performance.now() - flashcards.startedAt) / 1000;
-    paintFlashcardProgress(elapsed);
-    if (elapsed > 20) flipFlashcard(true);
-  }, 50);
   try {
-    await practice;
+    await api(`/api/words/${card.word_id}/practice`, { method: "POST", body: JSON.stringify({ round_id: flashcards.roundId }) });
     if (generation !== flashcards.generation) return;
     flashcards.displayReady = true;
     flashcardButton.disabled = false;
+    flashcards.startedAt = performance.now();
+    flashcards.timer = setInterval(() => {
+      const elapsed = (performance.now() - flashcards.startedAt) / 1000;
+      paintFlashcardProgress(elapsed);
+      if (elapsed > 15) flipFlashcard(true);
+    }, 50);
   } catch (error) {
     if (generation !== flashcards.generation) return;
     stopFlashcardTimer();
@@ -533,6 +597,10 @@ async function renderFlashcard() {
 
 async function startFlashcards(mode) {
   if (flashcards.pending) return;
+  stopQuizTimer();
+  quiz.generation += 1;
+  quiz.questions = [];
+  document.querySelector("#quiz-panel").hidden = true;
   resetFlashcards();
   setRoundPending(flashcards, "flashcard", true);
   const generation = flashcards.generation;
@@ -540,6 +608,7 @@ async function startFlashcards(mode) {
   try {
     const data = await api(`/api/flashcard/start?mode=${mode}`, { method: "POST" });
     if (generation !== flashcards.generation) return;
+    flashcards.roundId = data.round_id;
     flashcards.cards = data.cards;
     flashcards.index = 0;
     if (!flashcards.cards.length) {
