@@ -391,6 +391,10 @@ dialog form {
     font-size: 1.45rem;
   }
 
+  header {
+    margin-bottom: 0.75rem;
+  }
+
   header,
   .section-heading,
   .filters,
@@ -398,6 +402,14 @@ dialog form {
     align-items: stretch;
     flex-direction: column;
     gap: 0.65rem;
+  }
+
+  .section-heading {
+    margin-bottom: 0.5rem;
+  }
+
+  .filters {
+    margin: 0.5rem 0;
   }
 
   nav {
@@ -489,6 +501,6 @@ dialog form {
 
   th,
   td {
-    padding: 0.65rem;
+    padding: 0.5rem;
   }
 }
