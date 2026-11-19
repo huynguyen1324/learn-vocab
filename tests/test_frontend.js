@@ -477,7 +477,7 @@ test("phrase list has filtered numbering, mastery, practice count, warning thres
   const h = setup();
   h.requests[0].respond({ words: [
     { id: 9, english: "nine", vietnamese: "chín", status: "2/8", repetition_level: 2, practice_count: 7 },
-    { id: 12, english: "twelve", vietnamese: "mười hai", status: "3/8", repetition_level: 3, practice_count: 7 },
+    { id: 12, english: "twelve", vietnamese: "mười hai", status: "5/8", repetition_level: 5, practice_count: 7 },
   ] });
   await flush();
   const rows = h.el("word-list").children;
