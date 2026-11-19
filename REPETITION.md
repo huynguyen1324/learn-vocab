@@ -1,8 +1,0 @@
-- Để đạt mốc 1: Ôn lần đầu
-- Để đạt mốc 2: Ôn sau 1 giờ
-- Để đạt mốc 3: Ôn sau 1 ngày
-- Để đạt mốc 4: Ôn sau 3 ngày
-- Để đạt mốc 5: Ôn sau 1 tuần
-- Để đạt mốc 6: Ôn sau 1 tháng
-- Để đạt mốc 7: Ôn sau 3 tháng
-- Để đạt mốc hoàn thành: Ôn sau 1 năm

@@ -24,8 +24,8 @@ button {
 }
 
 .container {
-  width: min(100% - 2rem, 960px);
-  margin: 2rem auto;
+  width: min(100% - 0.75rem, 1280px);
+  margin: 0.75rem auto;
 }
 
 header,
@@ -143,25 +143,25 @@ table {
   text-align: left;
 }
 
-.number-column { width: 6%; }
+.number-column { width: 5%; }
 
 .english-column,
 .vietnamese-column {
   width: 20%;
 }
 
-.practice-column { width: 9%; }
+.practice-column { width: 10%; }
 
 .stage-column {
-  width: 13%;
+  width: 10%;
 }
 
 .review-column {
-  width: 18%;
+  width: 20%;
 }
 
 .actions-column {
-  width: 14%;
+  width: 15%;
 }
 
 th,

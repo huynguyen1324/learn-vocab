@@ -61,7 +61,7 @@ function renderWords(items) {
 
   for (const [index, word] of items.entries()) {
     const row = document.createElement("tr");
-    row.classList.toggle("needs-practice", word.practice_count - word.repetition_level > 4);
+    row.classList.toggle("needs-practice", word.practice_count - word.repetition_level >= 3);
     addCell(row, index + 1);
     addCell(row, word.english);
     addCell(row, word.vietnamese);
@@ -396,7 +396,7 @@ function paintFlashcardProgress(elapsed) {
   const progress = Math.min(elapsed / 20, 1);
   flashcardFill.style.width = `${progress * 100}%`;
   document.querySelector("#flashcard-progress").setAttribute("aria-valuenow", String(Math.round(progress * 20000)));
-  flashcardFill.dataset.band = elapsed <= 2 ? "fast" : elapsed <= 5 ? "medium" : elapsed <= 10 ? "slow" : "late";
+  flashcardFill.dataset.band = elapsed <= 3 ? "fast" : elapsed <= 5 ? "medium" : elapsed <= 15 ? "slow" : "late";
 }
 
 async function answerFlashcard(result, elapsed = null) {
