@@ -64,6 +64,23 @@ nav {
   gap: 0.5rem;
 }
 
+.stats-list {
+  margin: 0;
+}
+
+.stats-list > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.5rem 0;
+  border-bottom: 1px solid #c8d0da;
+}
+
+.stats-list dt,
+.stats-list dd {
+  margin: 0;
+}
+
 button,
 input,
 select {
@@ -277,8 +294,15 @@ dialog form {
 
 .mode-choices {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+  align-items: center;
   gap: 0.75rem;
+}
+
+.mode-choices .checkbox-label {
+  flex: 0 0 auto;
+  margin-left: auto;
+  white-space: nowrap;
 }
 
 .flashcard-progress {
@@ -436,7 +460,6 @@ dialog form {
   .search-label,
   .search-label input,
   .filters select,
-  .mode-choices button,
   .dialog-actions button {
     width: 100%;
   }
@@ -446,8 +469,7 @@ dialog form {
   }
 
   .mode-choices {
-    display: grid;
-    grid-template-columns: 1fr;
+    flex-wrap: nowrap;
   }
 
   .table-wrap {

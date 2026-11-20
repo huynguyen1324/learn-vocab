@@ -19,6 +19,7 @@ class Element {
     this.value = "";
     this.hidden = false;
     this.disabled = false;
+    this.checked = false;
     const classes = new Set();
     this.classList = {
       add: (name) => classes.add(name),
@@ -163,7 +164,7 @@ test("timeout failure retries the same card/result through Next", async () => {
   assert.equal(h.el("flashcard-back").hidden, false);
   assert.equal(h.el("flashcard-known").disabled, true);
   const first = h.requests.at(-1);
-  assert.deepEqual(JSON.parse(first.options.body), { word_id: 1, round_id: "round-1", result: "timeout", response_time_ms: 15000 });
+  assert.deepEqual(JSON.parse(first.options.body), { word_id: 1, round_id: "round-1", result: "timeout", response_time_ms: 10000 });
   assert.equal(h.el("start-flashcard-av").disabled, true);
   first.respond({ error: "offline" }, false);
   await flush();
@@ -227,8 +228,8 @@ for (const fail of [false, true]) {
   });
 }
 
-test("fast-flip known threshold remains inclusive at two seconds", async () => {
-  for (const [elapsed, disabled] of [[1999, false], [2000, false], [2001, true]]) {
+test("fast-flip known threshold remains inclusive at three seconds", async () => {
+  for (const [elapsed, disabled] of [[2999, false], [3000, false], [3001, true]]) {
     const h = setup();
     await startFlash(h);
     h.tick(elapsed);
@@ -467,7 +468,7 @@ test("flashcard clock excludes delayed practice acknowledgement", async () => {
   h.tick(21000); assert.equal(h.timers.size, 0);
   h.requests.at(-1).respond({}); await pending;
   assert.equal(h.run("flashcards.startedAt"), 21000);
-  h.tick(15000); assert.equal(h.requests.at(-1).url, "/api/words/1/practice");
+  h.tick(10000); assert.equal(h.requests.at(-1).url, "/api/words/1/practice");
   h.tick(1); assert.equal(h.requests.at(-1).url, "/api/flashcard/answer");
 });
 
@@ -492,6 +493,31 @@ test("phrase list has filtered numbering, mastery, practice count, warning thres
   assert.match(html, /Mức thông thạo/);
 });
 
+test("rest notice and stats tab", async () => {
+  const h = setup();
+  h.requests[0].respond({ words: [], today_practice: 201 });
+  await flush();
+  assert.equal(h.el("rest-notice").hidden, false);
+  h.run('showView("stats")');
+  assert.equal(h.el("stats-view").hidden, false);
+  assert.equal(h.requests.at(-1).url, "/api/stats");
+  h.requests.at(-1).respond({
+    total: 8, due: 2, upcoming: 3, completed: 3, hard: 1, mastery: 0.5, practice_count: 20,
+  });
+  await flush();
+  assert.equal(h.el("stat-total").textContent, 8);
+  assert.match(h.el("stat-mastery").textContent, /50/);
+});
+
+test("hard-review checkbox is sent only when ticked", async () => {
+  const h = setup();
+  h.requests[0].respond({ words: [] }); await flush();
+  h.el("quiz-hard").checked = true;
+  const pending = h.run('startQuiz("av")');
+  assert.match(h.requests.at(-1).url, /hard=1/);
+  h.requests.at(-1).respond({ round_id: "r", questions: [] }); await pending;
+});
+
 test("add and edit forms save without removed checkbox", async () => {
   for (const editing of [false, true]) {
     const h = setup();
@@ -514,7 +540,7 @@ test("sortable headers dispatch selected sort", async () => {
 });
 
 test("quiz boundaries retain time, exclude API wait, and safely retry frozen answers", async () => {
-  for (const elapsed of [3000, 3001, 7000, 7001, 15000, 15001]) {
+  for (const elapsed of [5000, 5001, 10000, 10001]) {
     const h = setup();
     const start = h.run('startQuiz("av")');
     h.requests.at(-1).respond({questions, round_id: "round-1"}); await flush();
@@ -522,12 +548,12 @@ test("quiz boundaries retain time, exclude API wait, and safely retry frozen ans
     h.requests.at(-1).respond({}); await start;
     assert.equal(JSON.parse(h.requests.at(-1).options.body).round_id, "round-1");
     h.tick(elapsed);
-    const pending = elapsed <= 15000 ? h.run("submitAnswer(1)") : null;
+    const pending = elapsed <= 10000 ? h.run("submitAnswer(1)") : null;
     const request = h.requests.at(-1);
     const payload = JSON.parse(request.options.body);
-    assert.equal(payload.response_time_ms, Math.min(elapsed, 15000));
-    assert.equal(payload.selected_id, elapsed > 15000 ? null : 1);
-    assert.equal(payload.result, elapsed > 15000 ? "timeout" : undefined);
+    assert.equal(payload.response_time_ms, Math.min(elapsed, 10000));
+    assert.equal(payload.selected_id, elapsed > 10000 ? null : 1);
+    assert.equal(payload.result, elapsed > 10000 ? "timeout" : undefined);
     assert.equal(h.el("choices").children.every(button => button.disabled), true);
     request.respond({error: "offline"}, false); if (pending) await pending; else await flush();
     assert.equal(h.run("quiz.saved"), false);
@@ -540,7 +566,7 @@ test("quiz boundaries retain time, exclude API wait, and safely retry frozen ans
 });
 
 test("flashcard flip boundaries send retained times for all self ratings", async () => {
-  for (const elapsed of [3000, 3001, 7000, 7001, 15000]) {
+  for (const elapsed of [5000, 5001, 10000]) {
     for (const result of ["correct", "wrong", "relative"]) {
       const h = setup(); await startFlash(h); h.tick(elapsed); h.run("flipFlashcard()");
       const pending = h.run(`answerFlashcard("${result}")`);

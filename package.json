@@ -1,0 +1,26 @@
+{
+  "name": "learn-vocab",
+  "version": "1.0.0",
+  "description": "Ứng dụng web học cụm từ tiếng Anh – Việt.",
+  "main": "index.js",
+  "directories": {
+    "test": "tests"
+  },
+  "scripts": {},
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/huynguyen1324/learn-vocab.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/huynguyen1324/learn-vocab/issues"
+  },
+  "homepage": "https://github.com/huynguyen1324/learn-vocab#readme",
+  "devDependencies": {
+    "@playwright/test": "^1.65.1",
+    "@types/node": "^26.6.6"
+  }
+}

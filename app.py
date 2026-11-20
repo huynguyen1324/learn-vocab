@@ -31,7 +31,8 @@ CREATE TABLE IF NOT EXISTS review_state (
     batch_day TEXT NOT NULL,
     round_id TEXT,
     round_kind TEXT,
-    round_mode TEXT
+    round_mode TEXT,
+    daily_practice INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS review_batch (word_id INTEGER PRIMARY KEY);
 CREATE TABLE IF NOT EXISTS review_receipts (
@@ -181,6 +182,10 @@ def create_app(test_config=None):
                 "before starting the app; startup will not convert or delete your data."
             )
         connection.executescript(SCHEMA)
+        columns = {row[1] for row in connection.execute("PRAGMA table_info(review_state)")}
+        if "daily_practice" not in columns:
+            connection.execute("ALTER TABLE review_state ADD COLUMN daily_practice INTEGER NOT NULL DEFAULT 0")
+            connection.commit()
     except Exception:
         connection.rollback()
         raise
@@ -241,7 +246,10 @@ def create_app(test_config=None):
             db.execute("DELETE FROM review_receipts")
             db.execute("DELETE FROM review_batch")
             db.execute("DELETE FROM review_round_words")
-            db.execute("INSERT OR REPLACE INTO review_state (singleton, batch_day) VALUES (1, ?)", (day,))
+            db.execute(
+                "INSERT OR REPLACE INTO review_state (singleton, batch_day, daily_practice) VALUES (1, ?, 0)",
+                (day,),
+            )
         db.execute("DELETE FROM review_batch WHERE word_id NOT IN "
                    "(SELECT id FROM collocations WHERE repetition_level < 8 AND next_review_at IS NOT NULL)")
 
@@ -275,23 +283,36 @@ def create_app(test_config=None):
     def elapsed_time(data, result):
         elapsed = data.get("response_time_ms")
         if (isinstance(elapsed, bool) or not isinstance(elapsed, (int, float))
-                or not math.isfinite(elapsed) or not 0 <= elapsed <= 15000
-                or (result == "timeout" and elapsed != 15000)
-                or (result == "known" and elapsed > 2000)):
+                or not math.isfinite(elapsed) or not 0 <= elapsed <= 10000
+                or (result == "timeout" and elapsed != 10000)
+                or (result == "known" and elapsed > 3000)):
             raise ValueError("Thời gian trả lời không hợp lệ.")
         return elapsed
 
     def save_result(db, word, result, elapsed):
         answered_at = local_now()
-        change = (-1 if result in {"wrong", "timeout"} else 0 if result == "relative"
-                  else 2 if elapsed <= 3000 else 1 if elapsed <= 7000 else 0)
-        level = 8 if result == "known" else min(8, max(0, word["repetition_level"] + change))
+        level = word["repetition_level"]
+        prior = max(word["practice_count"] - 1, 0)
+        if result == "known":
+            level = 8
+        elif result != "relative":
+            fail = result in {"wrong", "timeout"}
+            if level > 0:
+                change = -1 if fail else 1 if elapsed <= 5000 else 0
+            elif fail:
+                change = 0
+            elif prior == 0:
+                change = 2 if elapsed <= 5000 else 1
+            else:
+                change = 1
+            level = min(8, max(0, level + change))
         next_at = next_review_for_count(level, answered_at)
         next_text = next_at.isoformat() if next_at else None
         db.execute("UPDATE collocations SET repetition_level = ?, next_review_at = ? WHERE id = ?",
                    (level, next_text, word["id"]))
         refresh_batch(db, answered_at)
-        if next_at is not None and next_at.date() == answered_at.date():
+        hard = word["practice_count"] - level >= 3
+        if next_at is not None and next_at.date() == answered_at.date() and not hard:
             db.execute("INSERT OR IGNORE INTO review_batch (word_id) SELECT ? "
                        "WHERE (SELECT COUNT(*) FROM review_batch) < 100", (word["id"],))
         else:
@@ -304,17 +325,43 @@ def create_app(test_config=None):
                    (word_id, json.dumps({"path": request.path, "data": data}, sort_keys=True), json.dumps(result)))
         return result
 
-    def begin_round(db, kind, mode):
+    def hard_clause(hard):
+        op = ">=" if hard else "<"
+        return f"(practice_count - repetition_level {op} 3)"
+
+    def begin_round(db, kind, mode, hard=False):
         now = local_now()
         refresh_batch(db, now)
-        count = db.execute("SELECT COUNT(*) FROM review_batch").fetchone()[0]
-        rows = db.execute(
-            "SELECT * FROM collocations WHERE id IN (SELECT word_id FROM review_batch) "
-            "AND (next_review_at <= ? OR (repetition_level = 0 AND practice_count = 0)) ORDER BY id", (now.isoformat(),)).fetchall()
-        rows += db.execute(
-            "SELECT * FROM collocations WHERE id NOT IN (SELECT word_id FROM review_batch) "
-            "AND repetition_level < 8 AND (next_review_at <= ? OR (repetition_level = 0 AND practice_count = 0)) ORDER BY id LIMIT ?",
-            (now.isoformat(), 100 - count)).fetchall()
+        db.execute(
+            "DELETE FROM review_batch WHERE word_id IN "
+            "(SELECT id FROM collocations WHERE practice_count - repetition_level >= 3)"
+        )
+        now_text = now.isoformat()
+        due = "(next_review_at <= ? OR (repetition_level = 0 AND practice_count = 0))"
+        if hard:
+            rows = db.execute(
+                f"SELECT * FROM collocations WHERE repetition_level < 8 AND {due} AND {hard_clause(True)} "
+                "ORDER BY CASE WHEN practice_count > 0 THEN 0 ELSE 1 END, id LIMIT 100",
+                (now_text,),
+            ).fetchall()
+        else:
+            count = db.execute("SELECT COUNT(*) FROM review_batch").fetchone()[0]
+            rows = db.execute(
+                "SELECT * FROM collocations WHERE id IN (SELECT word_id FROM review_batch) "
+                f"AND {due} AND {hard_clause(False)} ORDER BY id", (now_text,)).fetchall()
+            slots = 100 - count
+            outside = (
+                "id NOT IN (SELECT word_id FROM review_batch) AND repetition_level < 8 AND "
+                f"{due} AND {hard_clause(False)}"
+            )
+            practiced = db.execute(
+                f"SELECT * FROM collocations WHERE {outside} AND practice_count > 0 ORDER BY id LIMIT ?",
+                (now_text, slots)).fetchall() if slots else []
+            remain = slots - len(practiced)
+            fresh = db.execute(
+                f"SELECT * FROM collocations WHERE {outside} AND practice_count = 0 ORDER BY id LIMIT ?",
+                (now_text, remain)).fetchall() if remain else []
+            rows += practiced + fresh
         round_id = uuid.uuid4().hex
         db.execute("UPDATE review_state SET round_id = ?, round_kind = ?, round_mode = ? WHERE singleton = 1",
                    (round_id, kind, mode))
@@ -330,7 +377,7 @@ def create_app(test_config=None):
     @app.get("/api/words")
     def list_words():
         status_filter = request.args.get("status", "all")
-        if status_filter not in {"all", "due", "upcoming"}:
+        if status_filter not in {"all", "due", "upcoming", "completed", "hard"}:
             return jsonify(error="Bộ lọc không hợp lệ."), 400
 
         # Handle sorting
@@ -361,9 +408,14 @@ def create_app(test_config=None):
             completed = row["repetition_level"] == 8 and row["next_review_at"] is None
             due = row["next_review_at"] is not None and (row["next_review_at"] <= now
                     or (row["repetition_level"] == 0 and row["practice_count"] == 0))
+            hard = row["practice_count"] - row["repetition_level"] >= 3
             if status_filter == "due" and not due:
                 continue
             if status_filter == "upcoming" and (due or completed):
+                continue
+            if status_filter == "completed" and not completed:
+                continue
+            if status_filter == "hard" and not hard:
                 continue
             result.append({
                 "id": row["id"],
@@ -374,7 +426,47 @@ def create_app(test_config=None):
                 "status": "Hoàn thành" if completed else f"{row['repetition_level']}/8",
                 "next_review_at": row["next_review_at"],
             })
-        return jsonify(words=result)
+        refresh_batch(get_db(), local_now())
+        today = get_db().execute("SELECT daily_practice FROM review_state WHERE singleton = 1").fetchone()
+        return jsonify(words=result, today_practice=today["daily_practice"] if today else 0)
+
+    @app.get("/api/stats")
+    def stats():
+        now = local_now()
+        refresh_batch(get_db(), now)
+        now_text = now.isoformat()
+        rows = get_db().execute(
+            "SELECT repetition_level, practice_count, next_review_at FROM collocations"
+        ).fetchall()
+        total = len(rows)
+        due = upcoming = done = hard = levels = practices = 0
+        for row in rows:
+            completed = row["repetition_level"] == 8 and row["next_review_at"] is None
+            is_due = row["next_review_at"] is not None and (
+                row["next_review_at"] <= now_text
+                or (row["repetition_level"] == 0 and row["practice_count"] == 0)
+            )
+            if completed:
+                done += 1
+            elif is_due:
+                due += 1
+            else:
+                upcoming += 1
+            if row["practice_count"] - row["repetition_level"] >= 3:
+                hard += 1
+            levels += row["repetition_level"]
+            practices += row["practice_count"]
+        today = get_db().execute("SELECT daily_practice FROM review_state WHERE singleton = 1").fetchone()
+        return jsonify(
+            total=total,
+            due=due,
+            upcoming=upcoming,
+            completed=done,
+            hard=hard,
+            mastery=0 if total == 0 else levels / (total * 8),
+            practice_count=practices,
+            today_practice=today["daily_practice"] if today else 0,
+        )
 
     @app.post("/api/words")
     def add_word():
@@ -406,6 +498,7 @@ def create_app(test_config=None):
                     raise Conflict("Từ đã được hiển thị trong lượt này.")
                 db.execute("UPDATE review_round_words SET shown = 1 WHERE word_id = ?", (word_id,))
                 db.execute("UPDATE collocations SET practice_count = practice_count + 1 WHERE id = ?", (word_id,))
+                db.execute("UPDATE review_state SET daily_practice = daily_practice + 1 WHERE singleton = 1")
             return jsonify(practice_count=word["practice_count"] + 1)
         except ValueError as error:
             return jsonify(error=str(error)), 400
@@ -493,7 +586,7 @@ def create_app(test_config=None):
             words = db.execute("SELECT id, english, vietnamese FROM collocations ORDER BY id").fetchall()
             if len(words) < 8:
                 return jsonify(error="Cần ít nhất 8 từ tiếng Anh trong danh sách để bắt đầu quiz."), 400
-            round_id, due_words = begin_round(db, "quiz", mode)
+            round_id, due_words = begin_round(db, "quiz", mode, request.args.get("hard") == "1")
             questions = []
             for word in due_words:
                 choices = select_distractors_with_interests(word["id"], words, 7) + [word]
@@ -544,7 +637,7 @@ def create_app(test_config=None):
         if mode is None:
             return jsonify(error="Chế độ ôn thẻ không hợp lệ."), 400
         with transaction() as db:
-            round_id, rows = begin_round(db, "flashcard", mode)
+            round_id, rows = begin_round(db, "flashcard", mode, request.args.get("hard") == "1")
             cards = [{"word_id": row["id"], "front": row["vietnamese" if mode == "va" else "english"],
                       "back": row["english" if mode == "va" else "vietnamese"],
                       "repetition_level": row["repetition_level"]} for row in rows]

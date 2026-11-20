@@ -15,6 +15,7 @@
         <button id="list-tab" class="tab active" type="button">Danh sách cụm từ</button>
         <button id="quiz-tab" class="tab" type="button">Ôn trắc nghiệm</button>
         <button id="flashcard-tab" class="tab" type="button">Ôn lật thẻ</button>
+        <button id="stats-tab" class="tab" type="button">Thống kê</button>
       </nav>
     </header>
 
@@ -34,9 +35,12 @@
             <option value="all">Tất cả</option>
             <option value="due">Đến hạn</option>
             <option value="upcoming">Chưa đến hạn</option>
+            <option value="completed">Đã hoàn thành</option>
+            <option value="hard">Từ khó ôn</option>
           </select>
         </label>
       </div>
+      <p id="rest-notice" class="muted" hidden>Hôm nay bạn đã ôn đủ nhiều, bạn có quyền nghỉ ngơi</p>
       <div class="table-wrap">
         <table>
           <colgroup>
@@ -74,13 +78,17 @@
       <div class="mode-choices">
         <button id="start-quiz-av" type="button">Ôn Anh - Việt</button>
         <button id="start-quiz-va" type="button">Ôn Việt - Anh</button>
+        <label class="checkbox-label">
+          <input id="quiz-hard" type="checkbox">
+          Ôn từ khó
+        </label>
       </div>
       <div id="quiz-panel" class="quiz-panel" hidden>
         <section class="question-card" aria-label="Câu hỏi">
           <p id="question-count" class="muted"></p>
           <h3 id="question-prompt"></h3>
           <p id="question-stage" class="muted"></p>
-          <div id="quiz-progress" class="flashcard-progress" role="progressbar" aria-label="Thời gian trả lời" aria-valuemin="0" aria-valuemax="15000" aria-valuenow="0">
+          <div id="quiz-progress" class="flashcard-progress" role="progressbar" aria-label="Thời gian trả lời" aria-valuemin="0" aria-valuemax="10000" aria-valuenow="0">
             <div id="quiz-progress-fill"></div>
           </div>
         </section>
@@ -104,11 +112,15 @@
       <div class="mode-choices">
         <button id="start-flashcard-av" type="button">Ôn Anh - Việt</button>
         <button id="start-flashcard-va" type="button">Ôn Việt - Anh</button>
+        <label class="checkbox-label">
+          <input id="flashcard-hard" type="checkbox">
+          Ôn từ khó
+        </label>
       </div>
       <div id="flashcard-panel" class="quiz-panel" hidden>
         <p id="flashcard-count" class="muted"></p>
         <p id="flashcard-stage" class="muted"></p>
-        <div id="flashcard-progress" class="flashcard-progress" role="progressbar" aria-label="Thời gian trả lời" aria-valuemin="0" aria-valuemax="15000" aria-valuenow="0">
+        <div id="flashcard-progress" class="flashcard-progress" role="progressbar" aria-label="Thời gian trả lời" aria-valuemin="0" aria-valuemax="10000" aria-valuenow="0">
           <div id="flashcard-progress-fill"></div>
         </div>
         <button id="flashcard" class="flashcard" type="button" aria-label="Lật thẻ">
@@ -124,6 +136,18 @@
           <button id="flashcard-next" class="primary" type="button" disabled>Tiếp theo</button>
           </div>
       </div>
+    </section>
+    <section id="stats-view" hidden>
+      <h2>Thống kê</h2>
+      <dl id="stats-list" class="stats-list">
+        <div><dt>Tổng số từ</dt><dd id="stat-total">0</dd></div>
+        <div><dt>Số từ đến hạn</dt><dd id="stat-due">0</dd></div>
+        <div><dt>Số từ chưa đến hạn</dt><dd id="stat-upcoming">0</dd></div>
+        <div><dt>Số từ đã hoàn thành</dt><dd id="stat-completed">0</dd></div>
+        <div><dt>Số từ khó học</dt><dd id="stat-hard">0</dd></div>
+        <div><dt>Tổng mức thông thạo</dt><dd id="stat-mastery">0</dd></div>
+        <div><dt>Tổng số lần ôn</dt><dd id="stat-practice">0</dd></div>
+      </dl>
     </section>
   </main>
 
