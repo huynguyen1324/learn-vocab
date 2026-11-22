@@ -36,7 +36,7 @@ def import_collocations(input_path=TOOLS / "output_collocations.txt", database_p
             english = unicodedata.normalize("NFC", english)
             if english.casefold() in existing:
                 continue
-            db.execute("INSERT INTO collocations (english, vietnamese, repetition_level, practice_count, next_review_at) VALUES (%s, %s, 0, 0, %s)",
+            db.execute("INSERT INTO collocations (english, vietnamese, repetition_level, practice_count, next_review_at) VALUES (?, ?, 0, 0, ?)",
                        (english.lower(), vietnamese.lower(), now))
             existing.add(english.casefold())
             inserted += 1

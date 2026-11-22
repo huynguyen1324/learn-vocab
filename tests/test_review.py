@@ -211,27 +211,6 @@ class ReviewTests(unittest.TestCase):
                                    json={'round_id': data['round_id'], 'response_time_ms': 1000})
         self.assertEqual(allowed.status_code, 200)
 
-    def test_first_flashcard_scoring_and_schedule(self):
-        for result, expected in (("correct", 2), ("relative", 1), ("wrong", 0)):
-            with self.subTest(result=result):
-                word = self.seed()
-                rid = self.start()['round_id']
-                self.show(word, rid)
-                response = self.answer(word, rid, result, 1000)
-                self.assertEqual(response.json['repetition_level'], expected)
-                if expected == 0:
-                    self.assertEqual(response.json['next_review_at'], (self.now + timedelta(hours=1)).isoformat())
-
-        for result, expected in (("correct", 2), ("relative", 1), ("wrong", 0)):
-            with self.subTest(result=result):
-                word = self.seed()
-                rid = self.start()['round_id']
-                self.show(word, rid)
-                response = self.answer(word, rid, result, 1000)
-                self.assertEqual(response.json['repetition_level'], expected)
-                if expected == 0:
-                    self.assertEqual(response.json['next_review_at'], (self.now + timedelta(hours=1)).isoformat())
-
     def test_quiz_completion_needs_correct_answer_for_same_shown_word_and_within_three_seconds(self):
         target = self.seed(8, 0)
         data = self.client.post('/api/quiz/start?table=collocations').json

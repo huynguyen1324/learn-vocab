@@ -53,7 +53,7 @@ class VocabularyAppTests(unittest.TestCase):
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
         database = Path(self.temp_dir.name) / "test.sqlite3"
-        self.app = create_app({"TESTING": True, "DATABASE": str(database), "DB_URL": None})
+        self.app = create_app({"TESTING": True, "DATABASE": str(database)})
         self.client = self.app.test_client()
         self.database = database
 

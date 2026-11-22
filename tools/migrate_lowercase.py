@@ -15,7 +15,7 @@ def migrate_lowercase(database_path=None):
     try:
         rows = connection.execute("SELECT id, english, vietnamese FROM vocabulary").fetchall()
         connection.executemany(
-            "UPDATE vocabulary SET english = %s, vietnamese = %s WHERE id = %s",
+            "UPDATE vocabulary SET english = ?, vietnamese = ? WHERE id = ?",
             [(row["english"].lower(), row["vietnamese"].lower(), row["id"]) for row in rows],
         )
         connection.commit()
