@@ -13,6 +13,7 @@
       <h1>Học cụm từ</h1>
       <nav aria-label="Điều hướng chính">
         <button id="list-tab" class="tab active" type="button">Danh sách cụm từ</button>
+        <button id="vocab-list-tab" class="tab" type="button">Danh sách từ vựng</button>
         <button id="quiz-tab" class="tab" type="button">Ôn trắc nghiệm</button>
         <button id="flashcard-tab" class="tab" type="button">Ôn lật thẻ</button>
         <button id="stats-tab" class="tab" type="button">Thống kê</button>
@@ -68,6 +69,52 @@
       </div>
     </section>
 
+    <section id="vocab-list-view" hidden>
+      <div class="section-heading">
+        <h2>Danh sách từ vựng</h2>
+        <button id="add-vocab-word" class="primary" type="button">Thêm từ vựng</button>
+      </div>
+      <div class="filters">
+        <label class="search-label">Tìm kiếm
+          <input id="vocab-search" type="search" placeholder="Từ tiếng Anh hoặc nghĩa tiếng Việt">
+        </label>
+        <label>Lọc theo lịch ôn
+          <select id="vocab-status-filter">
+            <option value="all">Tất cả</option>
+            <option value="due">Đến hạn</option>
+            <option value="upcoming">Chưa đến hạn</option>
+            <option value="completed">Đã hoàn thành</option>
+            <option value="hard">Từ khó ôn</option>
+          </select>
+        </label>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <colgroup>
+            <col class="number-column">
+            <col class="english-column">
+            <col class="vietnamese-column">
+            <col class="stage-column">
+            <col class="practice-column">
+            <col class="review-column">
+            <col class="actions-column">
+          </colgroup>
+          <thead>
+            <tr>
+              <th scope="col">STT</th>
+              <th scope="col" data-sort="english" class="sortable">Tiếng Anh</th>
+              <th scope="col">Nghĩa tiếng Việt</th>
+              <th scope="col" data-sort="repetition_level" class="sortable">Mức thông thạo</th>
+              <th scope="col" data-sort="practice_count" class="sortable">Số lần ôn</th>
+              <th scope="col" data-sort="next_review_at" class="sortable">Thời điểm ôn tiếp theo</th>
+              <th scope="col"><span class="sr-only">Thao tác</span></th>
+            </tr>
+          </thead>
+          <tbody id="vocab-word-list"></tbody>
+        </table>
+      </div>
+    </section>
+
     <section id="quiz-view" hidden>
       <div class="section-heading">
         <div>
@@ -78,6 +125,12 @@
       <div class="mode-choices">
         <button id="start-quiz-av" type="button">Ôn Anh - Việt</button>
         <button id="start-quiz-va" type="button">Ôn Việt - Anh</button>
+        <label class="checkbox-label">
+          <select id="quiz-table" class="table-select">
+            <option value="collocations">Cụm từ</option>
+            <option value="vocabulary">Từ vựng</option>
+          </select>
+        </label>
         <label class="checkbox-label">
           <input id="quiz-hard" type="checkbox">
           Ôn từ khó
@@ -113,6 +166,12 @@
         <button id="start-flashcard-av" type="button">Ôn Anh - Việt</button>
         <button id="start-flashcard-va" type="button">Ôn Việt - Anh</button>
         <label class="checkbox-label">
+          <select id="flashcard-table" class="table-select">
+            <option value="collocations">Cụm từ</option>
+            <option value="vocabulary">Từ vựng</option>
+          </select>
+        </label>
+        <label class="checkbox-label">
           <input id="flashcard-hard" type="checkbox">
           Ôn từ khó
         </label>
@@ -138,7 +197,7 @@
       </div>
     </section>
     <section id="stats-view" hidden>
-      <h2>Thống kê</h2>
+      <h2>Thống kê từ vựng</h2>
       <dl id="stats-list" class="stats-list">
         <div><dt>Tổng số từ</dt><dd id="stat-total">0</dd></div>
         <div><dt>Số từ đến hạn</dt><dd id="stat-due">0</dd></div>
@@ -154,6 +213,7 @@
   <dialog id="word-dialog">
     <form id="word-form">
       <h2 id="dialog-title">Thêm cụm từ</h2>
+      <p id="dialog-type-label" class="muted"></p>
       <label>Cụm từ tiếng Anh
         <input name="english" maxlength="500" required autocomplete="off">
       </label>

@@ -53,27 +53,27 @@ class VocabularyAppTests(unittest.TestCase):
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
         database = Path(self.temp_dir.name) / "test.sqlite3"
-        self.app = create_app({"TESTING": True, "DATABASE": str(database)})
+        self.app = create_app({"TESTING": True, "DATABASE": str(database), "DB_URL": None})
         self.client = self.app.test_client()
         self.database = database
 
     def tearDown(self):
         self.temp_dir.cleanup()
 
-    def insert_word(self, english, vietnamese, repetition_level=0, due=True):
+    def insert_word(self, english, vietnamese, repetition_level=0, due=True, table="collocations"):
         due_at = datetime.now().replace(microsecond=0)
         if not due:
             due_at += timedelta(days=10)
         with closing(sqlite3.connect(self.database)) as connection:
             cursor = connection.execute(
-                "INSERT INTO collocations (english, vietnamese, repetition_level, next_review_at, practice_count) "
+                f"INSERT INTO {table} (english, vietnamese, repetition_level, next_review_at, practice_count) "
                 "VALUES (?, ?, ?, ?, ?)",
                 (english.lower(), vietnamese, repetition_level, due_at.isoformat(), 0 if due else 1),
             )
             connection.commit()
             return cursor.lastrowid
 
-    def test_legacy_database_fails_without_modifying_data(self):
+    def test_legacy_vocabulary_table_does_not_block_startup(self):
         for progress_column in ("stage", "repetition_level"):
             with self.subTest(progress_column=progress_column), tempfile.TemporaryDirectory() as directory:
                 database = Path(directory) / "legacy.sqlite3"
@@ -87,25 +87,57 @@ class VocabularyAppTests(unittest.TestCase):
                     )
                     connection.commit()
                 before = database.read_bytes()
-                with self.assertRaisesRegex(sqlite3.DatabaseError, "export.*reset"):
-                    create_app({"TESTING": True, "DATABASE": str(database)})
-                self.assertEqual(database.read_bytes(), before)
+                # Bảng vocabulary không nên chặn khởi động app
+                app = create_app({"TESTING": True, "DATABASE": str(database)})
+                self.assertIsNotNone(app)
+                # Dữ liệu bảng vocabulary cũ vẫn được giữ nguyên
                 with closing(sqlite3.connect(database)) as connection:
-                    self.assertIsNone(connection.execute(
+                    row = connection.execute(
+                        "SELECT english, vietnamese FROM vocabulary WHERE id = 1"
+                    ).fetchone()
+                    self.assertEqual(row, ("Apple", "Quả táo"))
+                # Bảng collocations vẫn được tạo mới
+                with closing(sqlite3.connect(database)) as connection:
+                    self.assertIsNotNone(connection.execute(
                         "SELECT name FROM sqlite_master WHERE name = 'collocations'"
                     ).fetchone())
 
+    def test_vocabulary_end_to_end_isolated_from_collocations(self):
+        vocab_id = self.insert_word("apple", "quả táo", table="vocabulary")
+        self.insert_word("phrase", "cụm từ")
+        listed = self.client.get("/api/words?table=vocabulary").json["words"]
+        self.assertEqual([word["id"] for word in listed], [vocab_id])
+        self.assertEqual(self.client.get("/api/words?table=vocabulary&status=due").json["words"][0]["english"], "apple")
+        started = self.client.post("/api/flashcard/start?table=vocabulary")
+        self.assertEqual([card["word_id"] for card in started.json["cards"]], [vocab_id])
+        self.assertEqual(self.client.post(
+            f"/api/words/{vocab_id}/practice?table=vocabulary", json={"round_id": started.json["round_id"]}
+        ).status_code, 200)
+        answered = self.client.post("/api/flashcard/answer", json={
+            "word_id": vocab_id, "round_id": started.json["round_id"],
+            "result": "correct", "response_time_ms": 3000,
+        })
+        self.assertEqual(answered.status_code, 200)
+        self.assertEqual(self.client.get("/api/words?table=vocabulary").json["words"][0]["repetition_level"], 2)
+        stats = self.client.get("/api/stats").json
+        self.assertEqual(stats["vocabulary_stats"]["total"], 1)
+        self.assertEqual(stats["collocations_stats"]["total"], 1)
+
     def test_collocations_schema_defaults_and_constraints(self):
         with closing(sqlite3.connect(self.database)) as connection:
+            state_columns = [row[1] for row in connection.execute("PRAGMA table_info(review_state)")]
+            self.assertIn("practice_day", state_columns)
+            self.assertNotIn("batch_day", state_columns)
+            self.assertIsNone(connection.execute("SELECT name FROM sqlite_master WHERE name = 'review_batch'").fetchone())
             columns = [row[1] for row in connection.execute("PRAGMA table_info(collocations)")]
             self.assertEqual(columns, [
                 "id", "english", "vietnamese", "repetition_level", "practice_count", "next_review_at",
             ])
-            self.assertIsNone(connection.execute(
+            self.assertIsNotNone(connection.execute(
                 "SELECT name FROM sqlite_master WHERE name = 'vocabulary'"
             ).fetchone())
         word_id = self.insert_word("example", "ví dụ")
-        word = self.client.get("/api/words").json["words"][0]
+        word = self.client.get("/api/words?table=collocations").json["words"][0]
         self.assertEqual(word["practice_count"], 0)
         self.assertEqual(word["repetition_level"], 0)
         with closing(sqlite3.connect(self.database)) as connection:
@@ -123,14 +155,14 @@ class VocabularyAppTests(unittest.TestCase):
 
     def test_english_unicode_duplicates_are_normalized_without_english_key(self):
         for english, duplicate in (("Straße", "STRASSE"), ("Café", "Cafe\u0301")):
-            created = self.client.post("/api/words", json={"english": english, "vietnamese": "nghĩa"})
+            created = self.client.post("/api/words?table=collocations", json={"english": english, "vietnamese": "nghĩa"})
             self.assertEqual(created.status_code, 201)
             self.assertEqual(self.client.post(
-                "/api/words", json={"english": duplicate, "vietnamese": "trùng"}
+                "/api/words?table=collocations", json={"english": duplicate, "vietnamese": "trùng"}
             ).status_code, 409)
             other_id = self.insert_word(f"other-{created.json['id']}", "khác")
             self.assertEqual(self.client.put(
-                f"/api/words/{other_id}", json={"english": duplicate, "vietnamese": "trùng"}
+                f"/api/words/{other_id}?table=collocations", json={"english": duplicate, "vietnamese": "trùng"}
             ).status_code, 409)
 
     def test_word_text_length_limits_on_create_and_update(self):
@@ -140,40 +172,40 @@ class VocabularyAppTests(unittest.TestCase):
                 character = "a" if field == "english" else "ế"
                 data = {"english": f"word-{field}", "vietnamese": "nghĩa"}
                 data[field] = f"  {character * 500}  "
-                created = self.client.post("/api/words", json=data)
+                created = self.client.post("/api/words?table=collocations", json=data)
                 self.assertEqual(created.status_code, 201)
                 word_id = created.json["id"]
-                updated = self.client.put(f"/api/words/{word_id}", json=data)
+                updated = self.client.put(f"/api/words/{word_id}?table=collocations", json=data)
                 self.assertEqual(updated.status_code, 200)
 
                 data[field] = character * 501
                 for response in (
-                    self.client.post("/api/words", json=data),
-                    self.client.put(f"/api/words/{word_id}", json=data),
+                    self.client.post("/api/words?table=collocations", json=data),
+                    self.client.put(f"/api/words/{word_id}?table=collocations", json=data),
                 ):
                     self.assertEqual(response.status_code, 400)
                     self.assertEqual(response.json["error"], f"{label} không được dài quá 500 ký tự.")
-                word = next(word for word in self.client.get("/api/words").json["words"] if word["id"] == word_id)
+                word = next(word for word in self.client.get("/api/words?table=collocations").json["words"] if word["id"] == word_id)
                 self.assertEqual(word[field], character * 500)
 
     def test_words_are_lowercase_when_added(self):
         created = self.client.post(
-            "/api/words", json={"english": "Apple", "vietnamese": "Quả Táo"}
+            "/api/words?table=collocations", json={"english": "Apple", "vietnamese": "Quả Táo"}
         )
         self.assertEqual(created.status_code, 201)
-        word = self.client.get("/api/words").json["words"][0]
+        word = self.client.get("/api/words?table=collocations").json["words"][0]
         self.assertEqual((word["english"], word["vietnamese"]), ("apple", "quả táo"))
 
     def test_create_rejects_casefold_duplicate_and_edit_preserves_progress(self):
         created = self.client.post(
-            "/api/words",
+            "/api/words?table=collocations",
             json={"english": "Apple", "vietnamese": "quả táo"},
         )
         self.assertEqual(created.status_code, 201)
         word_id = created.json["id"]
 
         duplicate = self.client.post(
-            "/api/words",
+            "/api/words?table=collocations",
             json={"english": "APPLE", "vietnamese": "trái táo"},
         )
         self.assertEqual(duplicate.status_code, 409)
@@ -185,7 +217,7 @@ class VocabularyAppTests(unittest.TestCase):
             )
             connection.commit()
         updated = self.client.put(
-            f"/api/words/{word_id}",
+            f"/api/words/{word_id}?table=collocations",
             json={"english": "Red apple", "vietnamese": "quả táo đỏ"},
         )
         self.assertEqual(updated.status_code, 200)
@@ -199,38 +231,38 @@ class VocabularyAppTests(unittest.TestCase):
 
     def test_existing_word_can_be_completed_and_restarted(self):
         word_id = self.insert_word("known", "đã biết", repetition_level=4)
-        round_id = self.client.post("/api/flashcard/start").json["round_id"]
-        self.client.post(f"/api/words/{word_id}/practice", json={"round_id": round_id})
-        completed = self.client.post(f"/api/words/{word_id}/complete", json={"round_id": round_id, "response_time_ms": 2000})
+        round_id = self.client.post("/api/flashcard/start?table=collocations").json["round_id"]
+        self.client.post(f"/api/words/{word_id}/practice?table=collocations", json={"round_id": round_id})
+        completed = self.client.post(f"/api/words/{word_id}/complete?table=collocations", json={"round_id": round_id, "response_time_ms": 2000})
         self.assertEqual(completed.status_code, 200)
-        word = self.client.get("/api/words").json["words"][0]
+        word = self.client.get("/api/words?table=collocations").json["words"][0]
         self.assertEqual(word["status"], "Hoàn thành")
         self.assertIsNone(word["next_review_at"])
 
-        restarted = self.client.post(f"/api/words/{word_id}/restart")
+        restarted = self.client.post(f"/api/words/{word_id}/restart?table=collocations")
         self.assertEqual(restarted.status_code, 200)
-        word = self.client.get("/api/words?status=due").json["words"][0]
+        word = self.client.get("/api/words?table=collocations&status=due").json["words"][0]
         self.assertEqual(word["id"], word_id)
         self.assertEqual(word["repetition_level"], 0)
         self.assertIsNotNone(word["next_review_at"])
 
-        self.assertEqual(self.client.post(f"/api/words/{word_id}/restart").status_code, 409)
+        self.assertEqual(self.client.post(f"/api/words/{word_id}/restart?table=collocations").status_code, 409)
 
     def test_delete_removes_word(self):
         created = self.client.post(
-            "/api/words",
+            "/api/words?table=collocations",
             json={"english": "temporary", "vietnamese": "tạm thời"},
         )
         word_id = created.json["id"]
 
-        deleted = self.client.delete(f"/api/words/{word_id}")
+        deleted = self.client.delete(f"/api/words/{word_id}?table=collocations")
         self.assertEqual(deleted.status_code, 200)
-        self.assertEqual(self.client.get("/api/words").json["words"], [])
-        self.assertEqual(self.client.delete(f"/api/words/{word_id}").status_code, 404)
+        self.assertEqual(self.client.get("/api/words?table=collocations").json["words"], [])
+        self.assertEqual(self.client.delete(f"/api/words/{word_id}?table=collocations").status_code, 404)
 
     def test_search_is_unicode_case_insensitive_and_completed_are_not_due(self):
         word_id = self.insert_word("Học", "học tập")
-        response = self.client.get("/api/words?q=HỌC")
+        response = self.client.get("/api/words?table=collocations&q=HỌC")
         self.assertEqual([word["id"] for word in response.json["words"]], [word_id])
 
         with closing(sqlite3.connect(self.database)) as connection:
@@ -239,9 +271,9 @@ class VocabularyAppTests(unittest.TestCase):
                 (word_id,),
             )
             connection.commit()
-        listed = self.client.get("/api/words")
+        listed = self.client.get("/api/words?table=collocations")
         self.assertEqual(listed.json["words"][0]["status"], "Hoàn thành")
-        self.assertEqual(self.client.get("/api/words?status=due").json["words"], [])
+        self.assertEqual(self.client.get("/api/words?table=collocations&status=due").json["words"], [])
 
 
 
@@ -250,7 +282,7 @@ class VocabularyAppTests(unittest.TestCase):
         for index in range(7):
             self.insert_word(f"other-{index}", f"nghĩa {index}", due=False)
 
-        quiz = self.client.post("/api/quiz/start")
+        quiz = self.client.post("/api/quiz/start?table=collocations")
         question = next(
             question for question in quiz.json["questions"]
             if question["word_id"] == target_id
@@ -261,7 +293,7 @@ class VocabularyAppTests(unittest.TestCase):
     def test_quiz_requires_eight_words_and_month_arithmetic_clamps_day(self):
         for index in range(7):
             self.insert_word(f"word-{index}", f"nghĩa {index}")
-        response = self.client.post("/api/quiz/start")
+        response = self.client.post("/api/quiz/start?table=collocations")
         self.assertEqual(response.status_code, 400)
         self.assertIn("ít nhất 8 từ", response.json["error"])
         self.assertEqual(
@@ -290,7 +322,7 @@ class VocabularyAppTests(unittest.TestCase):
         for index in range(7):
             self.insert_word(f"word-{index}", f"nghĩa {index}", due=False)
 
-        quiz = self.client.post("/api/quiz/start?mode=av")
+        quiz = self.client.post("/api/quiz/start?mode=av&table=collocations")
         self.assertEqual(quiz.status_code, 200)
         question = next(
             q for q in quiz.json["questions"] if q["word_id"] == target_id
@@ -302,15 +334,15 @@ class VocabularyAppTests(unittest.TestCase):
 
 
     def test_quiz_rejects_invalid_mode(self):
-        response = self.client.post("/api/quiz/start?mode=invalid")
+        response = self.client.post("/api/quiz/start?mode=invalid&table=collocations")
         self.assertEqual(response.status_code, 400)
         self.assertIn("Chế độ quiz không hợp lệ", response.json["error"])
 
     def test_flashcard_modes_return_only_due_words(self):
         target_id = self.insert_word("apple", "quả táo")
         self.insert_word("book", "quyển sách", due=False)
-        av = self.client.post("/api/flashcard/start?mode=av")
-        va = self.client.post("/api/flashcard/start?mode=va")
+        av = self.client.post("/api/flashcard/start?mode=av&table=collocations")
+        va = self.client.post("/api/flashcard/start?mode=va&table=collocations")
         self.assertEqual(av.json["cards"], [{
             "word_id": target_id, "front": "apple", "back": "quả táo", "repetition_level": 0,
         }])

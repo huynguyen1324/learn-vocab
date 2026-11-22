@@ -110,7 +110,7 @@ const questions = [{
 async function settleDisplay(h, promise, data) {
   h.requests.at(-1).respond({ round_id: "round-1", ...data });
   await flush();
-  assert.match(h.requests.at(-1).url, /^\/api\/words\/\d+\/practice$/);
+  assert.match(h.requests.at(-1).url, /^\/api\/words\/\d+\/practice\?table=collocations$/);
   h.requests.at(-1).respond({ practice_count: 1 });
   await promise;
 }
@@ -177,10 +177,10 @@ test("timeout failure retries the same card/result through Next", async () => {
   h.requests.at(-1).respond({});
   await flush();
   assert.equal(h.el("flashcard-next").textContent, "Tiếp theo");
-  assert.equal(h.requests.filter((request) => request.url.endsWith("/practice")).length, 1, "timeout retry never recounts the front");
+  assert.equal(h.requests.filter((request) => request.url.includes("/practice?")).length, 1, "timeout retry never recounts the front");
   await h.el("flashcard-next").fire("click");
   assert.equal(h.el("flashcard-front").textContent, "two");
-  assert.equal(h.requests.at(-1).url, "/api/words/2/practice");
+  assert.equal(h.requests.at(-1).url, "/api/words/2/practice?table=collocations");
   h.requests.at(-1).respond({ practice_count: 1 });
   await flush();
 });
@@ -239,7 +239,7 @@ test("fast-flip known threshold remains inclusive at three seconds", async () =>
     assert.equal(h.timers.size, 0);
     if (!disabled) {
       const promise = h.run('answerFlashcard("known")');
-      assert.equal(h.requests.at(-1).url, "/api/words/1/complete");
+      assert.equal(h.requests.at(-1).url, "/api/words/1/complete?table=collocations");
       h.requests.at(-1).respond({});
       await promise;
     }
@@ -353,7 +353,7 @@ test("stale search errors are ignored; latest errors still surface", async () =>
   assert.equal(h.el("notice").textContent, "latest error");
 });
 
-const practiceRequests = (h) => h.requests.filter((request) => request.url.endsWith("/practice"));
+const practiceRequests = (h) => h.requests.filter((request) => request.url.includes("/practice?"));
 
 for (const type of ["quiz", "flashcard"]) {
   for (const fail of [false, true]) {
@@ -365,7 +365,7 @@ for (const type of ["quiz", "flashcard"]) {
       h.requests.at(-1).respond(type === "quiz" ? { questions } : { cards });
       await flush();
       assert.equal(practiceRequests(h).length, 1);
-      assert.equal(practiceRequests(h)[0].url, "/api/words/1/practice");
+      assert.equal(practiceRequests(h)[0].url, "/api/words/1/practice?table=collocations");
       assert.equal(practiceRequests(h)[0].options.method, "POST");
       assert.equal(h.el(`${type}-panel`).hidden, false, "front/question is visible before persistence");
       assert.equal(h.el(`start-${type}-av`).disabled, true);
@@ -429,7 +429,7 @@ test("quiz counts only each shown question, never distractors or answers", async
   assert.equal(practiceRequests(h).length, 1);
   await h.el("next-question").fire("click");
   assert.equal(practiceRequests(h).length, 2);
-  assert.equal(practiceRequests(h)[1].url, "/api/words/3/practice");
+  assert.equal(practiceRequests(h)[1].url, "/api/words/3/practice?table=collocations");
   await h.el("next-question").fire("click");
   assert.equal(practiceRequests(h).length, 2, "pending next is locked");
   h.requests.at(-1).respond({ practice_count: 1 });
@@ -449,7 +449,7 @@ test("flashcards count each shown front once, never flips, answers, retries or e
   assert.equal(practiceRequests(h).length, 1);
   await h.el("flashcard-next").fire("click");
   assert.equal(practiceRequests(h).length, 2);
-  assert.equal(practiceRequests(h)[1].url, "/api/words/2/practice");
+  assert.equal(practiceRequests(h)[1].url, "/api/words/2/practice?table=collocations");
   h.requests.at(-1).respond({ practice_count: 1 });
   await flush();
   h.run("flipFlashcard()");
@@ -468,7 +468,7 @@ test("flashcard clock excludes delayed practice acknowledgement", async () => {
   h.tick(21000); assert.equal(h.timers.size, 0);
   h.requests.at(-1).respond({}); await pending;
   assert.equal(h.run("flashcards.startedAt"), 21000);
-  h.tick(10000); assert.equal(h.requests.at(-1).url, "/api/words/1/practice");
+  h.tick(10000); assert.equal(h.requests.at(-1).url, "/api/words/1/practice?table=collocations");
   h.tick(1); assert.equal(h.requests.at(-1).url, "/api/flashcard/answer");
 });
 
@@ -493,7 +493,34 @@ test("phrase list has filtered numbering, mastery, practice count, warning thres
   assert.match(html, /Mức thông thạo/);
 });
 
-test("rest notice and stats tab", async () => {
+test("vocabulary list CRUD targets vocabulary and review selection/stats are wired", async () => {
+  const h = setup();
+  h.el("vocab-list-tab").fire("click");
+  assert.match(h.requests.at(-1).url, /table=vocabulary/);
+  h.requests.at(-1).respond({ words: [{ id: 4, english: "apple", vietnamese: "táo", status: "0/8", practice_count: 0, repetition_level: 0 }] });
+  await flush();
+  assert.equal(h.el("vocab-word-list").children[0].children[1].textContent, "apple");
+  assert.equal(h.el("vocab-word-list").children[0].children.length, 7);
+  await h.el("add-vocab-word").fire("click");
+  assert.equal(h.el("dialog-title").textContent, "Thêm từ vựng");
+  h.el("word-form").elements.english.value = "pear";
+  h.el("word-form").elements.vietnamese.value = "lê";
+  const save = h.el("word-form").fire("submit");
+  assert.equal(h.requests.at(-1).url, "/api/words?table=vocabulary");
+  h.requests.at(-1).respond({ id: 5 }); await flush();
+  assert.match(h.requests.at(-1).url, /table=vocabulary/);
+  h.requests.at(-1).respond({ words: [] }); await save;
+  h.el("quiz-table").value = "vocabulary";
+  const quiz = h.run('startQuiz("av")');
+  assert.match(h.requests.at(-1).url, /table=vocabulary/);
+  h.requests.at(-1).respond({ round_id: "v", questions: [] }); await quiz;
+  h.el("flashcard-table").value = "vocabulary";
+  const cards = h.run('startFlashcards("av")');
+  assert.match(h.requests.at(-1).url, /table=vocabulary/);
+  h.requests.at(-1).respond({ round_id: "v", cards: [] }); await cards;
+});
+
+test("rest notice and stats tab", async () => { 
   const h = setup();
   h.requests[0].respond({ words: [], today_practice: 201 });
   await flush();
@@ -502,7 +529,7 @@ test("rest notice and stats tab", async () => {
   assert.equal(h.el("stats-view").hidden, false);
   assert.equal(h.requests.at(-1).url, "/api/stats");
   h.requests.at(-1).respond({
-    total: 8, due: 2, upcoming: 3, completed: 3, hard: 1, mastery: 0.5, practice_count: 20,
+    vocabulary_stats: { total: 8, due: 2, upcoming: 3, completed: 3, hard: 1, mastery: 0.5, practice_count: 20 },
   });
   await flush();
   assert.equal(h.el("stat-total").textContent, 8);

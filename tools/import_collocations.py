@@ -11,7 +11,7 @@ TOOLS = Path(__file__).resolve().parent
 if __package__ in {None, ""}:
     sys.path.insert(0, str(ROOT))
 
-from app import create_app, local_now, required_text
+from app import connect_database, create_app, local_now, required_text, sql
 
 
 def parse_collocations(content):
@@ -24,21 +24,30 @@ def parse_collocations(content):
 
 def import_collocations(input_path=TOOLS / "output_collocations.txt", database_path=ROOT / "instance" / "vocabulary.sqlite3"):
     entries = parse_collocations(Path(input_path).read_text(encoding="utf-8-sig"))
-    create_app({"DATABASE": str(database_path)})
-    with closing(sqlite3.connect(database_path)) as db:
-        existing = {unicodedata.normalize("NFC", row[0]).casefold() for row in db.execute("SELECT english FROM collocations")}
+    database_url = f"sqlite:///{Path(database_path).resolve().as_posix()}"
+    create_app({"TESTING": True, "DATABASE": database_path})
+    db = connect_database(database_url)
+    try:
+        existing = {unicodedata.normalize("NFC", row["english"]).casefold()
+                    for row in db.execute("SELECT english FROM collocations")}
+        db.execute("BEGIN IMMEDIATE")
         inserted = 0
         now = local_now().isoformat()
-        with db:
-            for english, vietnamese in entries:
-                english = unicodedata.normalize("NFC", english)
-                if english.casefold() in existing:
-                    continue
-                db.execute("INSERT INTO collocations (english, vietnamese, repetition_level, practice_count, next_review_at) VALUES (?, ?, 0, 0, ?)",
-                           (english.lower(), vietnamese.lower(), now))
-                existing.add(english.casefold())
-                inserted += 1
-    return inserted, len(entries) - inserted
+        for english, vietnamese in entries:
+            english = unicodedata.normalize("NFC", english)
+            if english.casefold() in existing:
+                continue
+            db.execute(sql("INSERT INTO collocations (english, vietnamese, repetition_level, practice_count, next_review_at) VALUES (%s, %s, 0, 0, %s)", database_url),
+                       (english.lower(), vietnamese.lower(), now))
+            existing.add(english.casefold())
+            inserted += 1
+        db.commit()
+        return inserted, len(entries) - inserted
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
 
 
 def main(argv=None):

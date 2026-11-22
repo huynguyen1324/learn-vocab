@@ -1,6 +1,7 @@
 {
   "VOCAB_HOST": "127.0.0.1",
   "VOCAB_PORT": 5000,
+  "DB_URL": "postgresql://postgres:[YOUR-DATABASE-PASSWORD]@your-project.supabase.co:5432/postgres",
   "BASE_URL": "https://api.openai.com/v1",
   "API_KEY": "",
   "MODEL": ""

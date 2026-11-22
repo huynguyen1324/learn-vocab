@@ -24,27 +24,23 @@ class ReviewTests(unittest.TestCase):
         self.clock.stop()
         self.temp.cleanup()
 
-    def seed(self, count=1, level=0):
+    def seed(self, count=1, level=0, table='collocations'):
         with closing(sqlite3.connect(self.path)) as db, db:
-            start = db.execute('SELECT COALESCE(MAX(id),0) FROM collocations').fetchone()[0]
-            db.executemany('INSERT INTO collocations (english,vietnamese,repetition_level,next_review_at) VALUES (?,?,?,?)',
+            start = db.execute(f'SELECT COALESCE(MAX(id),0) FROM {table}').fetchone()[0]
+            db.executemany(f'INSERT INTO {table} (english,vietnamese,repetition_level,next_review_at) VALUES (?,?,?,?)',
                            [(f'word-{start+i}', f'meaning-{start+i}', level, self.now.isoformat()) for i in range(count)])
         return start + 1
 
     def start(self, kind='flashcard'):
-        result = self.client.post(f'/api/{kind}/start').json
+        result = self.client.post(f'/api/{kind}/start?table=collocations').json
         self.assertIn('round_id', result)
         return result
 
     def show(self, word, round_id):
-        return self.client.post(f'/api/words/{word}/practice', json={'round_id': round_id})
+        return self.client.post(f'/api/words/{word}/practice?table=collocations', json={'round_id': round_id})
 
     def answer(self, word, round_id, result='correct', elapsed=3000):
         return self.client.post('/api/flashcard/answer', json=dict(word_id=word, round_id=round_id, result=result, response_time_ms=elapsed))
-
-    def batch(self):
-        with closing(sqlite3.connect(self.path)) as db, db:
-            return {row[0] for row in db.execute('SELECT word_id FROM review_batch')}
 
     def test_grading_boundaries_shared_and_schedules(self):
         for kind in ('quiz', 'flashcard'):
@@ -70,20 +66,19 @@ class ReviewTests(unittest.TestCase):
 
     def test_protocol_stale_unshown_duplicates_and_known(self):
         word=self.seed();rid=self.start()['round_id']
-        self.assertEqual(self.client.post(f'/api/words/{word}/practice').status_code,415)
+        self.assertEqual(self.client.post(f'/api/words/{word}/practice?table=collocations').status_code,415)
         self.assertEqual(self.answer(word,rid).status_code,409)
         self.assertEqual(self.show(word,rid).status_code,200)
         self.assertEqual(self.show(word,rid).status_code,409)
-        self.assertEqual(self.client.post(f'/api/words/{word}/complete').status_code,415)
+        self.assertEqual(self.client.post(f'/api/words/{word}/complete?table=collocations').status_code,415)
         self.assertEqual(self.answer(word,rid,'known',3001).status_code,400)
         newer=self.start()['round_id']
         self.assertEqual(self.answer(word,rid).status_code,409)
         self.assertEqual(self.show(word,rid).status_code,409)
         self.show(word,newer)
-        self.assertEqual(self.client.post(f'/api/words/{word}/complete',json={'round_id':newer,'response_time_ms':3001}).status_code,400)
+        self.assertEqual(self.client.post(f'/api/words/{word}/complete?table=collocations',json={'round_id':newer,'response_time_ms':3001}).status_code,400)
         self.assertEqual(self.answer(word,newer,'known',3000).json['repetition_level'],8)
         self.assertEqual(self.answer(word,newer).status_code,409)
-        self.assertNotIn(word,self.batch())
 
     def test_quiz_timeout_choices_and_synonyms(self):
         word=self.seed(8,3)
@@ -100,52 +95,67 @@ class ReviewTests(unittest.TestCase):
         self.assertEqual(response.json['repetition_level'],2)
         self.assertCountEqual(response.json['correct_option_ids'],[word,word+1])
 
-    def test_batch_capacity_wait_restart_day_reset_and_free_slot(self):
-        self.seed(105)
-        data=self.start();self.assertEqual(len(data['cards']),100)
-        rid=data['round_id']
-        for card in data['cards']:
-            word=card['word_id'];self.show(word,rid)
-            self.assertEqual(self.answer(word,rid,'relative').status_code,200)
-        self.assertEqual(len(self.batch()),100)
-        self.assertEqual(self.start()['cards'],[])
-        restarted=create_app({'TESTING':True,'DATABASE':self.path}).test_client()
-        self.assertEqual(restarted.post('/api/flashcard/start').json['cards'],[])
-        self.now += timedelta(hours=1)
-        data=self.start();self.assertEqual(len(data['cards']),100)
-        word=data['cards'][0]['word_id'];self.show(word,data['round_id'])
-        self.answer(word,data['round_id'],'known',3000)
-        self.assertEqual(len(self.batch()),99)
-        next_round=self.start()
-        self.assertEqual(len(next_round['cards']),100)
-        self.assertTrue(all(c['word_id'] in self.batch() for c in next_round['cards'][:-1]))
-        self.assertEqual(len({c['word_id'] for c in next_round['cards']} - self.batch()),1)
-        self.now += timedelta(days=1)
-        self.assertEqual(self.show(next_round['cards'][0]['word_id'],next_round['round_id']).status_code,409)
-        self.start()
-        self.assertEqual(self.batch(),set())
+    def test_rounds_randomize_within_practiced_then_fresh_priority(self):
+        self.seed(80)
+        with closing(sqlite3.connect(self.path)) as db, db:
+            db.execute("UPDATE collocations SET practice_count = 1 WHERE id <= 40")
+        seen = set()
+        for _ in range(12):
+            data = self.start()
+            ids = [card['word_id'] for card in data['cards']]
+            self.assertEqual(len(ids), 80)
+            self.assertTrue(all(word_id <= 40 for word_id in ids[:40]))
+            self.assertTrue(all(word_id > 40 for word_id in ids[40:]))
+            seen.add(tuple(ids[:40]))
+        self.assertGreater(len(seen), 1)
 
-    def test_delete_complete_remove_batch_and_new_words_ignore_complete(self):
+    def test_hard_rounds_are_unlimited_and_randomized(self):
+        self.seed(80)
+        with closing(sqlite3.connect(self.path)) as db, db:
+            db.execute("UPDATE collocations SET practice_count = 5")
+        seen = set()
+        for _ in range(12):
+            data = self.client.post('/api/flashcard/start?hard=1&table=collocations').json
+            ids = [card['word_id'] for card in data['cards']]
+            self.assertEqual(len(ids), 80)
+            seen.add(tuple(ids))
+        self.assertGreater(len(seen), 1)
+
+    def test_priority_and_randomization_apply_to_vocabulary_too(self):
+        self.seed(80, table='vocabulary')
+        with closing(sqlite3.connect(self.path)) as db, db:
+            db.execute("UPDATE vocabulary SET practice_count = 1 WHERE id <= 40")
+        seen = set()
+        for _ in range(12):
+            data = self.client.post('/api/flashcard/start?table=vocabulary').json
+            ids = [card['word_id'] for card in data['cards']]
+            self.assertEqual(len(ids), 80)
+            self.assertTrue(all(word_id <= 40 for word_id in ids[:40]))
+            self.assertTrue(all(word_id > 40 for word_id in ids[40:]))
+            seen.add(tuple(ids[:40]))
+        self.assertGreater(len(seen), 1)
+
+    def test_delete_round_word_and_new_words_ignore_complete(self):
         word=self.seed();rid=self.start()['round_id'];self.show(word,rid);self.answer(word,rid,'relative')
-        self.assertIn(word,self.batch())
-        self.assertEqual(self.client.delete(f'/api/words/{word}').status_code,200)
-        self.assertEqual(self.batch(),set())
-        created=self.client.post('/api/words',json={'english':'new','vietnamese':'mới','complete':True})
-        record=self.client.get('/api/words').json['words'][0]
+        self.assertEqual(self.client.delete(f'/api/words/{word}?table=collocations').status_code,200)
+        with closing(sqlite3.connect(self.path)) as db:
+            self.assertIsNone(db.execute('SELECT 1 FROM review_round_words WHERE word_id = ?', (word,)).fetchone())
+        created=self.client.post('/api/words?table=collocations',json={'english':'new','vietnamese':'mới','complete':True})
+        record=self.client.get('/api/words?table=collocations').json['words'][0]
         self.assertEqual((record['repetition_level'],record['practice_count']),(0,0))
         self.assertEqual(record['next_review_at'],self.now.isoformat())
 
     def test_atomic_concurrent_answer_and_practice(self):
         word=self.seed();rid=self.start()['round_id']
         def show(_):
-            return self.app.test_client().post(f'/api/words/{word}/practice',json={'round_id':rid}).status_code
+            return self.app.test_client().post(f'/api/words/{word}/practice?table=collocations',json={'round_id':rid}).status_code
         with ThreadPoolExecutor(2) as pool:
             self.assertCountEqual(list(pool.map(show,range(2))),[200,409])
         def answer(_):
             return self.app.test_client().post('/api/flashcard/answer',json=dict(word_id=word,round_id=rid,result='correct',response_time_ms=3000)).status_code
         with ThreadPoolExecutor(2) as pool:
             self.assertCountEqual(list(pool.map(answer,range(2))),[200,200])
-        record=self.client.get('/api/words').json['words'][0]
+        record=self.client.get('/api/words?table=collocations').json['words'][0]
         self.assertEqual((record['practice_count'],record['repetition_level']),(1,2))
 
     def test_grading_depends_on_level_and_prior_practice(self):
@@ -175,7 +185,7 @@ class ReviewTests(unittest.TestCase):
         with closing(sqlite3.connect(self.path)) as db, db:
             db.execute('UPDATE collocations SET next_review_at = ? WHERE id = ?',
                        ((self.now + timedelta(days=5)).isoformat(), word))
-        self.assertEqual(self.client.get('/api/words?status=due').json['words'][0]['id'], word)
+        self.assertEqual(self.client.get('/api/words?table=collocations&status=due').json['words'][0]['id'], word)
         rid = self.start()['round_id']
         self.assertEqual(self.show(word, rid).status_code, 200)
         # Once shown, the old future timestamp must not invalidate this allowed item.
@@ -192,9 +202,9 @@ class ReviewTests(unittest.TestCase):
                 db.execute('UPDATE collocations SET vietnamese = ? WHERE id = ?', ('quả táo', word))
                 db.execute('UPDATE collocations SET vietnamese = ? WHERE id = ?',
                            (unicodedata.normalize('NFD', '  QUẢ   TÁO '), word + 1))
-            data = self.client.post(f'/api/quiz/start?mode={mode}').json
+            data = self.client.post(f'/api/quiz/start?mode={mode}&table=collocations').json
             question = next(q for q in data['questions'] if q['word_id'] == word)
-            record = next(w for w in self.client.get('/api/words').json['words'] if w['id'] == word)
+            record = next(w for w in self.client.get('/api/words?table=collocations').json['words'] if w['id'] == word)
             self.assertEqual(record['practice_count'], 0)
             self.show(word, data['round_id'])
             response = self.client.post(f'/api/quiz/answer?mode={mode}', json=dict(
@@ -202,10 +212,10 @@ class ReviewTests(unittest.TestCase):
                 choice_ids=[c['id'] for c in question['choices']]))
             self.assertTrue(response.json['correct'])
             self.assertEqual(response.json['repetition_level'], 8)
-            record = next(w for w in self.client.get('/api/words').json['words'] if w['id'] == word)
+            record = next(w for w in self.client.get('/api/words?table=collocations').json['words'] if w['id'] == word)
             self.assertEqual(record['practice_count'], 1)
             for _ in range(2):
-                self.assertEqual(self.client.post(f'/api/words/{word}/complete',
+                self.assertEqual(self.client.post(f'/api/words/{word}/complete?table=collocations',
                     json={'round_id':data['round_id']}).status_code, 200)
 
     def test_invalid_times_and_zero_floor(self):
@@ -225,13 +235,14 @@ class ReviewTests(unittest.TestCase):
             db.execute("UPDATE collocations SET next_review_at = ? WHERE id = 2",
                        ((self.now + timedelta(days=2)).isoformat(),))
         empty = self.client.get('/api/stats').json
-        self.assertEqual((empty['total'], empty['due'], empty['upcoming'], empty['completed'], empty['hard']), (3, 1, 1, 1, 1))
-        self.assertEqual(empty['practice_count'], 5)
-        self.assertAlmostEqual(empty['mastery'], 9 / 24)
+        cs = empty['collocations_stats']
+        self.assertEqual((cs['total'], cs['due'], cs['upcoming'], cs['completed'], cs['hard']), (3, 1, 1, 1, 1))
+        self.assertEqual(cs['practice_count'], 5)
+        self.assertAlmostEqual(cs['mastery'], 9 / 24)
         rid = self.start()['round_id']
-        self.assertEqual(self.client.get('/api/words').json['today_practice'], 0)
+        self.assertEqual(self.client.get('/api/words?table=collocations').json['today_practice'], 0)
         self.show(1, rid)
-        self.assertEqual(self.client.get('/api/words').json['today_practice'], 1)
+        self.assertEqual(self.client.get('/api/words?table=collocations').json['today_practice'], 1)
         self.now += timedelta(days=1)
         self.assertEqual(self.client.get('/api/stats').json['today_practice'], 0)
 
@@ -243,12 +254,12 @@ class ReviewTests(unittest.TestCase):
             db.execute('UPDATE collocations SET practice_count = 5, next_review_at = ? WHERE id = ?',
                        (self.now.isoformat(), hard))
             db.execute('UPDATE collocations SET next_review_at = NULL WHERE id = ?', (done,))
-        listed = {word['id'] for word in self.client.get('/api/words?status=hard').json['words']}
+        listed = {word['id'] for word in self.client.get('/api/words?table=collocations&status=hard').json['words']}
         self.assertEqual(listed, {hard})
-        self.assertEqual({w['id'] for w in self.client.get('/api/words?status=completed').json['words']}, {done})
+        self.assertEqual({w['id'] for w in self.client.get('/api/words?table=collocations&status=completed').json['words']}, {done})
         normal = self.start()
         self.assertEqual({c['word_id'] for c in normal['cards']}, {easy})
-        focused = self.client.post('/api/flashcard/start?hard=1').json
+        focused = self.client.post('/api/flashcard/start?hard=1&table=collocations').json
         self.assertEqual({c['word_id'] for c in focused['cards']}, {hard})
 
 

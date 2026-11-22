@@ -19,7 +19,7 @@ Các mức thông thạo repetition:
     + Trả lời (nhớ) đúng trong <= 5s cộng 2 repetition_level (từ dễ, nhưng không đến mức quá dễ để chọn "Đã biết")
     + Trả lời (nhớ) trong <= 10s cộng 1 repetition_level
     + Sau 10s hoặc trả lời (nhớ) sai thì ngừng đếm giờ và giữ nguyên repetition_level
-- Với từ có repetition_level = 0 và practice_count > 0 (từ khó nhớ)
+- Với từ có repetition_level = 0 và practice_count > 0 (từ có nguy cơ khó ôn)
     + Trả lời (nhớ) đúng trong <= 10s cộng 1 repetition_level
     + Sau 10s hoặc trả lời (nhớ) sai thì ngừng đếm giờ và giữ nguyên repetition_level
 - Ưu tiên chọn từ các từ có practice_count > 0 và đến hạn để ôn, rồi mới chọn đến các từ mới toanh có practice_count = 0, tránh việc từ cũ chưa thạo đã ôm thêm từ mới
