@@ -191,6 +191,67 @@ class ReviewTests(unittest.TestCase):
         # Once shown, the old future timestamp must not invalidate this allowed item.
         self.assertEqual(self.answer(word, rid, 'relative').status_code, 200)
 
+    def test_quiz_completion_needs_correct_answer_for_same_shown_word_and_within_three_seconds(self):
+        target = self.seed(8, 0)
+        data = self.client.post('/api/quiz/start?table=collocations').json
+        question = next(q for q in data['questions'] if q['word_id'] == target)
+        self.show(target, data['round_id'])
+        other = target + 1
+        response = self.client.post(f'/api/words/{other}/complete?table=collocations',
+                                    json={'round_id': data['round_id'], 'response_time_ms': 0})
+        self.assertEqual(response.status_code, 409)
+        answered = self.client.post('/api/quiz/answer', json=dict(
+            round_id=data['round_id'], word_id=target, selected_id=target,
+            response_time_ms=2000, choice_ids=[choice['id'] for choice in question['choices']]))
+        self.assertEqual(answered.status_code, 200)
+        too_slow = self.client.post(f'/api/words/{target}/complete?table=collocations',
+                                    json={'round_id': data['round_id'], 'response_time_ms': 1001})
+        self.assertEqual(too_slow.status_code, 400)
+        allowed = self.client.post(f'/api/words/{target}/complete?table=collocations',
+                                   json={'round_id': data['round_id'], 'response_time_ms': 1000})
+        self.assertEqual(allowed.status_code, 200)
+
+    def test_first_flashcard_scoring_and_schedule(self):
+        for result, expected in (("correct", 2), ("relative", 1), ("wrong", 0)):
+            with self.subTest(result=result):
+                word = self.seed()
+                rid = self.start()['round_id']
+                self.show(word, rid)
+                response = self.answer(word, rid, result, 1000)
+                self.assertEqual(response.json['repetition_level'], expected)
+                if expected == 0:
+                    self.assertEqual(response.json['next_review_at'], (self.now + timedelta(hours=1)).isoformat())
+
+        for result, expected in (("correct", 2), ("relative", 1), ("wrong", 0)):
+            with self.subTest(result=result):
+                word = self.seed()
+                rid = self.start()['round_id']
+                self.show(word, rid)
+                response = self.answer(word, rid, result, 1000)
+                self.assertEqual(response.json['repetition_level'], expected)
+                if expected == 0:
+                    self.assertEqual(response.json['next_review_at'], (self.now + timedelta(hours=1)).isoformat())
+
+    def test_quiz_completion_needs_correct_answer_for_same_shown_word_and_within_three_seconds(self):
+        target = self.seed(8, 0)
+        data = self.client.post('/api/quiz/start?table=collocations').json
+        question = next(q for q in data['questions'] if q['word_id'] == target)
+        self.show(target, data['round_id'])
+        other = target + 1
+        response = self.client.post(f'/api/words/{other}/complete?table=collocations',
+                                    json={'round_id': data['round_id'], 'response_time_ms': 0})
+        self.assertEqual(response.status_code, 409)
+        answered = self.client.post('/api/quiz/answer', json=dict(
+            round_id=data['round_id'], word_id=target, selected_id=target,
+            response_time_ms=2000, choice_ids=[choice['id'] for choice in question['choices']]))
+        self.assertEqual(answered.status_code, 200)
+        too_slow = self.client.post(f'/api/words/{target}/complete?table=collocations',
+                                    json={'round_id': data['round_id'], 'response_time_ms': 1001})
+        self.assertEqual(too_slow.status_code, 400)
+        allowed = self.client.post(f'/api/words/{target}/complete?table=collocations',
+                                   json={'round_id': data['round_id'], 'response_time_ms': 1000})
+        self.assertEqual(allowed.status_code, 200)
+
     def test_quiz_normalized_synonyms_both_modes_count_and_completion(self):
         import unicodedata
         for mode in ('va', 'av'):

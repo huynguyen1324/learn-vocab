@@ -19,11 +19,9 @@ STOPWORDS = frozenset({
 
 
 def count_words(database=ROOT / "instance" / "vocabulary.sqlite3"):
-    from app import create_app, connect_database
+    from app import connect_database
     database = Path(database)
-    configured_url = create_app().config["DATABASE_URL"]
-    db_url = f"sqlite:///{database.resolve().as_posix()}" if configured_url.startswith("sqlite:///") or database.exists() else configured_url
-    db = connect_database(db_url)
+    db = connect_database(database)
     try:
         rows = db.execute("SELECT english FROM collocations").fetchall()
     finally:
@@ -36,7 +34,7 @@ def count_words(database=ROOT / "instance" / "vocabulary.sqlite3"):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--database", type=Path, default=ROOT / "instance" / "vocabulary.sqlite3", help="Read from this SQLite file if present; otherwise use DB_URL")
+    parser.add_argument("--database", type=Path, default=ROOT / "instance" / "vocabulary.sqlite3", help="SQLite database file to read")
     parser.add_argument("--output", type=Path, default=TOOLS / "word_count_statistic.txt")
     args = parser.parse_args(argv)
     try:

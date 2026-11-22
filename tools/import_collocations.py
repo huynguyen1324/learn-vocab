@@ -11,7 +11,7 @@ TOOLS = Path(__file__).resolve().parent
 if __package__ in {None, ""}:
     sys.path.insert(0, str(ROOT))
 
-from app import connect_database, create_app, local_now, required_text, sql
+from app import connect_database, create_app, local_now, required_text
 
 
 def parse_collocations(content):
@@ -24,9 +24,8 @@ def parse_collocations(content):
 
 def import_collocations(input_path=TOOLS / "output_collocations.txt", database_path=ROOT / "instance" / "vocabulary.sqlite3"):
     entries = parse_collocations(Path(input_path).read_text(encoding="utf-8-sig"))
-    database_url = f"sqlite:///{Path(database_path).resolve().as_posix()}"
     create_app({"TESTING": True, "DATABASE": database_path})
-    db = connect_database(database_url)
+    db = connect_database(database_path)
     try:
         existing = {unicodedata.normalize("NFC", row["english"]).casefold()
                     for row in db.execute("SELECT english FROM collocations")}
@@ -37,7 +36,7 @@ def import_collocations(input_path=TOOLS / "output_collocations.txt", database_p
             english = unicodedata.normalize("NFC", english)
             if english.casefold() in existing:
                 continue
-            db.execute(sql("INSERT INTO collocations (english, vietnamese, repetition_level, practice_count, next_review_at) VALUES (%s, %s, 0, 0, %s)", database_url),
+            db.execute("INSERT INTO collocations (english, vietnamese, repetition_level, practice_count, next_review_at) VALUES (%s, %s, 0, 0, %s)",
                        (english.lower(), vietnamese.lower(), now))
             existing.add(english.casefold())
             inserted += 1

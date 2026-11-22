@@ -10,16 +10,12 @@ TOOLS = Path(__file__).resolve().parent
 
 
 def export_vocabulary(database=ROOT / "instance" / "vocabulary.sqlite3", output=TOOLS / "input_vocab.txt"):
-    from app import connect_database, create_app
+    from app import connect_database
     output = Path(output)
     database = Path(database)
-    if database.exists() and database.is_file():
-        db_url = f"sqlite:///{database.resolve().as_posix()}"
-    else:
-        db_url = create_app().config["DATABASE_URL"]
     if output.resolve() == database.resolve():
         raise ValueError("Export output must not overwrite the database.")
-    db = connect_database(db_url)
+    db = connect_database(database)
     try:
         rows = db.execute("SELECT english, vietnamese FROM vocabulary ORDER BY id").fetchall()
     finally:
@@ -41,7 +37,7 @@ def export_vocabulary(database=ROOT / "instance" / "vocabulary.sqlite3", output=
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--database", type=Path, default=ROOT / "instance" / "vocabulary.sqlite3", help="Read from this SQLite file if present; otherwise use DB_URL")
+    parser.add_argument("--database", type=Path, default=ROOT / "instance" / "vocabulary.sqlite3", help="SQLite database file to read")
     parser.add_argument("--output", type=Path, default=TOOLS / "input_vocab.txt")
     args = parser.parse_args(argv)
     try:

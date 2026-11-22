@@ -326,7 +326,7 @@ async function renderQuestion() {
   feedback.textContent = "";
   markComplete.hidden = true;
   markComplete.disabled = false;
-  markComplete.textContent = "Đánh dấu hoàn thành";
+  markComplete.textContent = "Đã biết";
   next.hidden = true;
   next.textContent = "Tiếp theo";
   quiz.answering = false;
@@ -385,6 +385,7 @@ async function submitAnswer(selectedId) {
     });
     if (generation !== quiz.generation) return;
     quiz.saved = true;
+    quiz.answerStartedAt = performance.now();
     quiz.retryAnswer = null;
     if (result.correct) quiz.correct += 1;
     for (const button of document.querySelectorAll("#choices .choice")) {
@@ -399,7 +400,7 @@ async function submitAnswer(selectedId) {
     feedback.textContent = result.correct
       ? `Chính xác. Đáp án đúng: ${correctWords.join(", ")}.`
       : `Chưa chính xác. Đáp án đúng: ${correctWords.join(", ")}.`;
-    markComplete.hidden = !result.correct || result.completed;
+    markComplete.hidden = !result.correct || result.completed || performance.now() - quiz.startedAt > 3000;
     next.hidden = false;
     next.textContent = "Tiếp theo";
   } catch (error) {
@@ -464,10 +465,10 @@ document.querySelector("#mark-complete").addEventListener("click", async (event)
   setRoundPending(quiz, "quiz", true);
   button.disabled = true;
   try {
-    await api(`/api/words/${question.word_id}/complete?table=${quiz.table}`, { method: "POST", body: JSON.stringify({ round_id: quiz.roundId }) });
+    await api(`/api/words/${question.word_id}/complete?table=${quiz.table}`, { method: "POST", body: JSON.stringify({ round_id: quiz.roundId, response_time_ms: Math.round(performance.now() - quiz.startedAt) }) });
     if (generation !== quiz.generation) return;
-    button.textContent = "Đã đánh dấu hoàn thành";
-    document.querySelector("#feedback").textContent += " Cụm từ đã được đánh dấu hoàn thành.";
+    button.textContent = "Đã biết";
+    document.querySelector("#feedback").textContent += " Đã biết.";
   } catch (error) {
     if (generation !== quiz.generation) return;
     button.disabled = false;
@@ -505,8 +506,8 @@ function paintFlashcardProgress(elapsed) {
 
 async function answerFlashcard(result, elapsed = null) {
   if (flashcards.pending || !flashcards.displayReady || flashcards.answered || !flashcards.cards[flashcards.index]) return;
-  if (flashcards.flippedAt === null || (result === "known" && flashcards.flippedAt > 3000) || (flashcards.retryTimeout && result !== "timeout")) return;
-  elapsed = result === "timeout" ? 10000 : Math.min(Math.round(flashcards.flippedAt), 10000);
+  if ((!flashcards.cards[flashcards.index].first_review && flashcards.flippedAt === null) || (result === "known" && performance.now() - flashcards.startedAt > 3000) || (flashcards.retryTimeout && result !== "timeout")) return;
+  elapsed = result === "timeout" ? 10000 : Math.min(Math.round(flashcards.firstReview ? performance.now() - flashcards.startedAt : flashcards.flippedAt), 10000);
   flashcards.answered = true;
   setRoundPending(flashcards, "flashcard", true);
   const generation = flashcards.generation;
@@ -558,7 +559,7 @@ async function answerFlashcard(result, elapsed = null) {
 }
 
 function flipFlashcard(automatic = false) {
-  if (flashcards.pending || !flashcards.displayReady || !flashcards.cards[flashcards.index] || flashcards.flippedAt !== null) return;
+  if (flashcards.pending || !flashcards.displayReady || !flashcards.cards[flashcards.index] || flashcards.flippedAt !== null || flashcards.cards[flashcards.index].first_review) return;
   const elapsed = performance.now() - flashcards.startedAt;
   automatic = automatic || elapsed > 10000;
   flashcards.flippedAt = automatic ? 10000 : elapsed;
@@ -603,7 +604,7 @@ async function renderFlashcard() {
   document.querySelector("#flashcard-stage").textContent = `Mức thông thạo: ${card.repetition_level}/8`;
   document.querySelector("#flashcard-front").textContent = card.front;
   document.querySelector("#flashcard-back").textContent = card.back;
-  document.querySelector("#flashcard-back").hidden = true;
+  document.querySelector("#flashcard-back").hidden = !card.first_review;
   document.querySelector("#flashcard-progress-fill").style.width = "0%";
   document.querySelector("#flashcard-progress").setAttribute("aria-valuenow", "0");
   feedback.textContent = "";
@@ -622,8 +623,12 @@ async function renderFlashcard() {
     await api(`/api/words/${card.word_id}/practice?table=${flashcards.table}`, { method: "POST", body: JSON.stringify({ round_id: flashcards.roundId }) });
     if (generation !== flashcards.generation) return;
     flashcards.displayReady = true;
-    flashcardButton.disabled = false;
     flashcards.startedAt = performance.now();
+    if (card.first_review) {
+      for (const id of ["flashcard-correct", "flashcard-wrong", "flashcard-relative", "flashcard-known"]) document.querySelector(`#${id}`).disabled = false;
+      return;
+    }
+    flashcardButton.disabled = false;
     flashcards.timer = setInterval(() => {
       const elapsed = (performance.now() - flashcards.startedAt) / 1000;
       paintFlashcardProgress(elapsed);

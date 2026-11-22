@@ -235,20 +235,21 @@ def create_app(test_config=None):
     app.config.from_mapping(DATABASE_URL=None, TESTING=False)
     if test_config:
         app.config.update(test_config)
-    app.config["DATABASE_URL"] = app.config.get("DATABASE_URL") or app.config.get("DB_URL")
-    if not app.config["DATABASE_URL"]:
-        with SERVER_CONFIG.open(encoding="utf-8") as config_file:
-            app.config["DATABASE_URL"] = json.load(config_file).get("DB_URL")
-    app.config["DATABASE_URL"] = os.environ.get("DB_URL", app.config["DATABASE_URL"])
-    if not app.config["DATABASE_URL"]:
-        raise ValueError('Set "DB_URL" in config.json or the DB_URL environment variable.')
-
     if app.config.get("DATABASE"):
-        app.config["DATABASE_URL"] = f"sqlite:///{Path(app.config['DATABASE']).resolve().as_posix()}"
+        app.config["DATABASE_URL"] = f"sqlite:///{Path(app.config['DATABASE']).resolve()}"
+    else:
+        app.config["DATABASE_URL"] = app.config.get("DATABASE_URL") or app.config.get("DB_URL")
+        if not app.config["DATABASE_URL"]:
+            with SERVER_CONFIG.open(encoding="utf-8") as config_file:
+                app.config["DATABASE_URL"] = json.load(config_file).get("DB_URL")
+        app.config["DATABASE_URL"] = os.environ.get("DB_URL", app.config["DATABASE_URL"])
+        if not app.config["DATABASE_URL"]:
+            raise ValueError('Set "DB_URL" in config.json or the DB_URL environment variable.')
     connection = connect_database(app.config["DATABASE_URL"])
     try:
         if app.config["DATABASE_URL"].startswith("sqlite:///"):
             connection.executescript(SQLITE_SCHEMA)
+            connection.execute("CREATE UNIQUE INDEX IF NOT EXISTS vocabulary_english_unique ON vocabulary (lower(english))")
             columns = {row[1] for row in connection.execute("PRAGMA table_info(review_state)")}
         else:
             for statement in POSTGRES_SCHEMA.strip().split(";"):
@@ -388,19 +389,24 @@ def create_app(test_config=None):
             raise ValueError("Thời gian trả lời không hợp lệ.")
         return elapsed
 
-    def save_result(db, word, result, elapsed, table="collocations"):
+    def save_result(db, word, result, elapsed, table="collocations", first_review=None):
         answered_at = local_now()
         level = word["repetition_level"]
-        prior = max(word["practice_count"] - 1, 0)
+        if first_review is None:
+            first_review = level == 0 and word["practice_count"] == 1
         if result == "known":
             level = 8
+        elif first_review and result == "relative":
+            level = 1
+        elif first_review and result == "correct":
+            level = 2
         elif result != "relative":
             fail = result in {"wrong", "timeout"}
             if level > 0:
                 change = -1 if fail else 1 if elapsed <= 5000 else 0
             elif fail:
                 change = 0
-            elif prior == 0:
+            elif first_review:
                 change = 2 if elapsed <= 5000 else 1
             else:
                 change = 1
@@ -560,13 +566,13 @@ def create_app(test_config=None):
             vietnamese = required_text(data.get("vietnamese"), "Nghĩa tiếng Việt")
             repetition_level = 0
             next_review_at = local_now().isoformat()
-            # Kiểm tra trùng lặp trong cùng bảng
-            reject_duplicate_english(table, english)
-            cursor = get_db().execute(
-                f"INSERT INTO {table} (english, vietnamese, repetition_level, next_review_at) "
-                "VALUES (%s, %s, %s, %s) RETURNING id",
-                (english, vietnamese.lower(), repetition_level, next_review_at),
-            ).fetchone()
+            with transaction() as db:
+                reject_duplicate_english(table, english)
+                cursor = db.execute(
+                    f"INSERT INTO {table} (english, vietnamese, repetition_level, next_review_at) "
+                    "VALUES (%s, %s, %s, %s) RETURNING id",
+                    (english, vietnamese.lower(), repetition_level, next_review_at),
+                ).fetchone()
         except ValueError as error:
             return jsonify(error=str(error)), 400
         except DuplicateEnglishError as error:
@@ -608,9 +614,17 @@ def create_app(test_config=None):
                         raise ValueError("Thiếu round_id hợp lệ.")
                     if state["round_id"] != data["round_id"]:
                         raise Conflict("Lượt ôn đã được thay thế.")
+                    elapsed = data.get("response_time_ms")
+                    if (isinstance(elapsed, bool) or not isinstance(elapsed, (int, float))
+                            or not math.isfinite(elapsed) or not 0 <= elapsed <= 3000):
+                        raise ValueError("Thời gian trả lời không hợp lệ.")
+                    item = db.execute("SELECT shown, answered FROM review_round_words WHERE word_id = %s", (word_id,)).fetchone()
                     saved = db.execute("SELECT response_json FROM review_receipts WHERE word_id = %s", (word_id,)).fetchone()
-                    if saved is None or not json.loads(saved["response_json"]).get("correct"):
+                    if item is None or not item["shown"] or not item["answered"] or saved is None or not json.loads(saved["response_json"]).get("correct"):
                         raise Conflict("Chỉ có thể hoàn thành sau câu trả lời đúng.")
+                    response_data = json.loads(saved["response_json"])
+                    if elapsed + response_data.get("response_time_ms", 0) > 3000:
+                        raise ValueError("Chỉ có thể đánh dấu đã biết trong 3 giây từ lúc hiện câu hỏi.")
                     db.execute(f"UPDATE {table} SET repetition_level = 8, next_review_at = NULL WHERE id = %s", (word_id,))
                     return jsonify(success=True, repetition_level=8, next_review_at=None, completed=True)
                 elapsed = elapsed_time(data, "known")
@@ -764,7 +778,8 @@ def create_app(test_config=None):
             round_id, rows = begin_round(db, "flashcard", mode, request.args.get("hard") == "1", table)
             cards = [{"word_id": row["id"], "front": row["vietnamese" if mode == "va" else "english"],
                       "back": row["english" if mode == "va" else "vietnamese"],
-                      "repetition_level": row["repetition_level"]} for row in rows]
+                      "repetition_level": row["repetition_level"],
+                      "first_review": row["practice_count"] == 0 and row["repetition_level"] == 0} for row in rows]
         return jsonify(round_id=round_id, cards=cards)
 
     @app.post("/api/flashcard/answer")
@@ -781,7 +796,8 @@ def create_app(test_config=None):
                 word, item = round_word(db, data, word_id, "flashcard", shown=True)
                 if word is None:
                     return jsonify(**item)
-                result = receipt(db, word_id, data, save_result(db, word, result, elapsed, table))
+                first_review = word["repetition_level"] == 0 and word["practice_count"] == 1
+                result = receipt(db, word_id, data, save_result(db, word, result, elapsed, table, first_review))
             return jsonify(**result)
         except (ValueError, TypeError) as error:
             return jsonify(error=str(error)), 400

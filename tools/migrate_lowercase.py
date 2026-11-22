@@ -5,18 +5,17 @@ ROOT = Path(__file__).resolve().parents[1]
 if __package__ in {None, ""}:
     sys.path.insert(0, str(ROOT))
 
-from app import connect_database, create_app, sql
+from app import connect_database, create_app
 
 
 def migrate_lowercase(database_path=None):
     app = create_app()
-    configured_url = app.config["DATABASE_URL"]
-    database_url = f"sqlite:///{Path(database_path).resolve().as_posix()}" if database_path is not None and (configured_url.startswith("sqlite:///") or Path(database_path).exists()) else configured_url
-    connection = connect_database(database_url)
+    database = Path(database_path) if database_path is not None else Path(app.config["DATABASE"])
+    connection = connect_database(database)
     try:
         rows = connection.execute("SELECT id, english, vietnamese FROM vocabulary").fetchall()
         connection.executemany(
-            sql("UPDATE vocabulary SET english = %s, vietnamese = %s WHERE id = %s"),
+            "UPDATE vocabulary SET english = %s, vietnamese = %s WHERE id = %s",
             [(row["english"].lower(), row["vietnamese"].lower(), row["id"]) for row in rows],
         )
         connection.commit()

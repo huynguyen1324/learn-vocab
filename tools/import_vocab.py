@@ -6,7 +6,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if __package__ in {None, ""}:
     sys.path.insert(0, str(ROOT))
 
-from app import connect_database, local_now, required_text, sql
+from app import connect_database, local_now, required_text
 
 INPUT_PATH = ROOT / "tools" / "toeic_vocab.md"
 DATABASE_PATH = ROOT / "instance" / "vocabulary.sqlite3"
@@ -53,31 +53,21 @@ def import_vocabulary(input_path=INPUT_PATH, database_path=None):
 
     if database_path is None:
         from app import create_app
-        app = create_app()
-        database_url = app.config["DATABASE_URL"]
-    else:
-        database_url = f"sqlite:///{Path(database_path).resolve().as_posix()}"
+        database_path = create_app().config["DATABASE"]
 
-    connection = connect_database(database_url)
+    connection = connect_database(database_path)
     try:
         now = local_now().isoformat()
-        if database_url.startswith("sqlite:///"):
-            connection.executescript(SCHEMA_VOCABULARY)
-            connection.execute("BEGIN IMMEDIATE")
-        else:
-            connection.execute("BEGIN")
+        connection.executescript(SCHEMA_VOCABULARY)
+        connection.execute("BEGIN IMMEDIATE")
         try:
             connection.execute("DELETE FROM vocabulary")
-            if database_url.startswith("sqlite:///"):
-                connection.executescript("CREATE TABLE IF NOT EXISTS review_receipts (word_id INTEGER PRIMARY KEY, request_json TEXT NOT NULL, response_json TEXT NOT NULL); CREATE TABLE IF NOT EXISTS review_round_words (word_id INTEGER PRIMARY KEY, choice_ids TEXT, shown INTEGER NOT NULL DEFAULT 0, answered INTEGER NOT NULL DEFAULT 0);")
+            connection.executescript("CREATE TABLE IF NOT EXISTS review_receipts (word_id INTEGER PRIMARY KEY, request_json TEXT NOT NULL, response_json TEXT NOT NULL); CREATE TABLE IF NOT EXISTS review_round_words (word_id INTEGER PRIMARY KEY, choice_ids TEXT, shown INTEGER NOT NULL DEFAULT 0, answered INTEGER NOT NULL DEFAULT 0);")
             connection.execute("DELETE FROM review_receipts")
             connection.execute("DELETE FROM review_round_words")
             if connection.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='review_state'").fetchone():
                 connection.execute("UPDATE review_state SET round_id = NULL, round_kind = NULL, round_mode = NULL WHERE singleton = 1")
             connection.executemany(
-                "INSERT INTO vocabulary "
-                "(english, vietnamese, repetition_level, practice_count, next_review_at) "
-                "VALUES (%s, %s, 0, 0, %s)" if not database_url.startswith("sqlite:///") else
                 "INSERT INTO vocabulary (english, vietnamese, repetition_level, practice_count, next_review_at) VALUES (?, ?, 0, 0, ?)",
                 [(english, vietnamese, now) for english, vietnamese in entries],
             )

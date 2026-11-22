@@ -102,6 +102,7 @@ const cards = [
   { word_id: 1, front: "one", back: "một", repetition_level: 2 },
   { word_id: 2, front: "two", back: "hai", repetition_level: 3 },
 ];
+const firstReviewCard = { word_id: 3, front: "three", back: "ba", repetition_level: 0, first_review: true };
 const questions = [{
   word_id: 1, prompt: "một", repetition_level_after_correct: 3,
   choices: [{ id: 1, text: "one" }, { id: 2, text: "two" }],
@@ -228,6 +229,22 @@ for (const fail of [false, true]) {
   });
 }
 
+test("first-review flashcard shows back and enables ratings without flipping or timeout", async () => {
+  const h = setup();
+  const pending = h.run('startFlashcards("av")');
+  h.requests.at(-1).respond({ round_id: "round-1", cards: [firstReviewCard] });
+  await flush();
+  assert.equal(h.el("flashcard-back").hidden, false);
+  assert.equal(h.el("flashcard").disabled, true);
+  assert.equal(h.requests.at(-1).url, "/api/words/3/practice?table=collocations");
+  h.requests.at(-1).respond({ practice_count: 1 });
+  await pending;
+  for (const id of ["flashcard-correct", "flashcard-wrong", "flashcard-relative", "flashcard-known"]) assert.equal(h.el(id).disabled, false);
+  h.tick(11000);
+  assert.equal(h.requests.at(-1).url, "/api/words/3/practice?table=collocations");
+  assert.equal(h.timers.size, 0);
+});
+
 test("fast-flip known threshold remains inclusive at three seconds", async () => {
   for (const [elapsed, disabled] of [[2999, false], [3000, false], [3001, true]]) {
     const h = setup();
@@ -240,6 +257,7 @@ test("fast-flip known threshold remains inclusive at three seconds", async () =>
     if (!disabled) {
       const promise = h.run('answerFlashcard("known")');
       assert.equal(h.requests.at(-1).url, "/api/words/1/complete?table=collocations");
+      assert.equal(JSON.parse(h.requests.at(-1).options.body).response_time_ms, elapsed);
       h.requests.at(-1).respond({});
       await promise;
     }
