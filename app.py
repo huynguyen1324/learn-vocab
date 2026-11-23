@@ -742,9 +742,12 @@ def create_app(test_config=None):
                     "choices": [{"id": choice["id"], "text": choice[meaning_field if mode == "av" else "english"]} for choice in choices],
                 }
                 if table == "synonymous_collocations":
-                    question["correct_vietnamese"] = db.execute(
-                        "SELECT vietnamese FROM synonymous_collocations WHERE id = ?", (word["id"],)
-                    ).fetchone()["vietnamese"]
+                    correct_row = db.execute(
+                        "SELECT english, synonym, vietnamese FROM synonymous_collocations WHERE id = ?", (word["id"],)
+                    ).fetchone()
+                    question["correct_english"] = correct_row["english"]
+                    question["correct_synonym"] = correct_row["synonym"]
+                    question["correct_vietnamese"] = correct_row["vietnamese"]
                 questions.append(question)
         return jsonify(round_id=round_id, questions=questions)
 

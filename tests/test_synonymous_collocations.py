@@ -115,6 +115,8 @@ class SynonymousCollocationTests(unittest.TestCase):
             self.assertTrue(question["prompt"].startswith("have "))
             self.assertIn("...", question["prompt"])
             self.assertTrue(all("..." in choice["text"] for choice in question["choices"]))
+            self.assertEqual(question["correct_english"], rows[question["word_id"] - 1][0])
+            self.assertEqual(question["correct_synonym"], rows[question["word_id"] - 1][1])
             self.assertEqual(question["correct_vietnamese"], "nghĩa")
 
     def test_quiz_and_flashcard_use_english_pair_fields(self):

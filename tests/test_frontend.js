@@ -598,8 +598,11 @@ test("rest notice and stats tab", async () => {
   });
   await flush();
   assert.equal(h.el("collocation-stat-total").textContent, 0);
-  assert.equal(h.el("synonym-stat-total").textContent, "");
-  assert.equal(h.el("stat-total").textContent, "");
+  assert.equal(h.el("collocation-stat-practice").textContent, 0);
+  assert.equal(h.el("synonym-stat-total").textContent, 0);
+  assert.equal(h.el("synonym-stat-practice").textContent, 0);
+  assert.equal(h.el("stat-total").textContent, 8);
+  assert.equal(h.el("stat-practice").textContent, 20);
 });
 
 test("hard-review checkbox is sent only when ticked", async () => {
@@ -630,6 +633,23 @@ test("add and edit forms save without removed checkbox", async () => {
 test("sortable headers dispatch selected sort", async () => {
   const h = setup(); await h.headers[0].fire("click");
   assert.match(h.requests.at(-1).url, /sort_by=english_desc/);
+});
+
+test("synonym quiz feedback shows English, synonym, and Vietnamese on separate lines", async () => {
+  const h = setup();
+  h.el("quiz-table").value = "synonymous_collocations";
+  const start = h.run('startQuiz("av")');
+  h.requests.at(-1).respond({ round_id: "round-1", questions: [{ ...questions[0], correct_english: "take a bus", correct_synonym: "catch a bus", correct_vietnamese: "bắt xe" }] });
+  await flush();
+  h.requests.at(-1).respond({ practice_count: 1 });
+  await start;
+  const answer = h.run("submitAnswer(1)");
+  h.requests.at(-1).respond({ correct: true, correct_option_ids: [1], completed: false });
+  await answer;
+  assert.equal(h.el("feedback").children.length, 6);
+  assert.match(h.el("feedback").children[1].textContent, /Tiếng Anh: take a bus/);
+  assert.match(h.el("feedback").children[3].textContent, /Đồng nghĩa: catch a bus/);
+  assert.match(h.el("feedback").children[5].textContent, /Nghĩa tiếng Việt: bắt xe/);
 });
 
 test("quiz boundaries retain time, exclude API wait, and safely retry frozen answers", async () => {

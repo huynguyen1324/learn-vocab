@@ -287,6 +287,8 @@ class ReviewTests(unittest.TestCase):
         self.assertEqual((cs['total'], cs['due'], cs['upcoming'], cs['completed'], cs['hard']), (3, 1, 1, 1, 1))
         self.assertEqual(cs['practice_count'], 5)
         self.assertAlmostEqual(cs['mastery'], 9 / 24)
+        self.assertEqual(empty['vocabulary_stats']['practice_count'], 0)
+        self.assertEqual(empty['synonymous_collocations_stats']['practice_count'], 0)
         rid = self.start()['round_id']
         self.assertEqual(self.client.get('/api/words?table=collocations').json['today_practice'], 0)
         self.show(1, rid)

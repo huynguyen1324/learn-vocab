@@ -1,18 +1,12 @@
 # Learn Vocab
 
-Ứng dụng web học cụm từ tiếng Anh – Việt.
+Ứng dụng web hỗ trợ học tiếng Anh qua cụm từ, cụm từ đồng nghĩa và từ vựng, kèm nghĩa tiếng Việt.
 
-- **Quản lý cụm từ:** Thêm, sửa, xóa và chống trùng để xây dựng kho từ cá nhân.
-- **Tìm, lọc và sắp xếp:** Tra cứu Anh/Việt,` lọc lịch ôn, sắp theo mức thông thạo hoặc số lần ôn để chọn từ cần học.
-- **Trắc nghiệm hai chiều:** Chọn 1 trong 8 đáp án Anh–Việt hoặc Việt–Anh để kiểm tra khả năng nhớ nghĩa.
-- **Lật thẻ hai chiều:** Tự đánh giá mức nhớ trong 10 giây để luyện phản xạ và điều chỉnh mức thông thạo theo tốc độ trả lời.
-- **Ôn cách quãng:** Tự lên lịch ôn theo kết quả và mức thông thạo 0–8 để củng cố trí nhớ dài hạn.
-- **Ưu tiên ôn từ cũ:** Từ đã ôn và đến hạn được đưa lên trước từ mới để tránh học lan man khi còn từ cũ chưa ôn xong.
-- **Theo dõi tiến độ:** Hiển thị mức thông thạo, số lần ôn và lịch ôn tiếp theo để nắm tình trạng từng cụm từ.
-- **Hoàn thành và học lại:** Đánh dấu từ đã biết hoặc khởi động lại từ đã hoàn thành để chủ động quản lý việc ôn.
-- **AI tạo cụm từ (script):** Chuyển danh sách từ thành cụm từ kèm nghĩa Việt, theo hồ sơ cá nhân để học sát nhu cầu.
-- **Nhập hàng loạt (script):** Nạp các cặp Anh–Việt từ tệp văn bản, bỏ qua từ trùng để bổ sung kho học nhanh.
-- **Xuất dữ liệu cũ (script):** Xuất bảng vocabulary cũ ra văn bản để chuyển sang quy trình học cụm từ.
+- **Quản lý nội dung học:** Thêm, sửa, xóa, tìm kiếm, lọc và sắp xếp các mục trong từng danh sách.
+- **Luyện tập:** Ôn bằng trắc nghiệm hoặc thẻ ghi nhớ, theo cả hai chiều Anh–Việt và Việt–Anh; cụm từ đồng nghĩa có thể luyện theo mẫu cụm từ.
+- **Ôn tập cá nhân hóa:** Theo dõi tiến độ và lịch ôn cách quãng dựa trên kết quả luyện tập.
+- **Thống kê:** Xem tổng quan tiến độ riêng cho từng danh sách.
+- **Nhập dữ liệu:** Hỗ trợ nhập hàng loạt nội dung học từ tệp để xây dựng danh sách cá nhân.
 
 ## Cài đặt và chạy
 

@@ -232,7 +232,7 @@ async function loadStats() {
   for (const [prefix, key] of [["collocation-", "collocations_stats"], ["synonym-", "synonymous_collocations_stats"], ["", "vocabulary_stats"]]) {
     const stats = data[key];
     for (const field of ["total", "due", "upcoming", "completed", "hard", "practice_count"]) {
-      const target = document.querySelector(`#${prefix}stat-${field}`);
+      const target = document.querySelector(`#${prefix}stat-${field === "practice_count" ? "practice" : field}`);
       if (target) target.textContent = stats[field];
     }
     const mastery = document.querySelector(`#${prefix}stat-mastery`);
@@ -422,11 +422,13 @@ async function submitAnswer(selectedId) {
     feedback.textContent = result.correct
       ? `Chính xác. Đáp án đúng: ${correctWords.join(", ")}.`
       : `Chưa chính xác. Đáp án đúng: ${correctWords.join(", ")}.`;
-    if (quiz.table === "synonymous_collocations" && question.correct_vietnamese) {
-      const vietnamese = document.createElement("span");
-      vietnamese.className = "quiz-vietnamese-meaning";
-      vietnamese.textContent = `Nghĩa tiếng Việt: ${question.correct_vietnamese}`;
-      feedback.append(document.createElement("br"), vietnamese);
+    if (quiz.table === "synonymous_collocations") {
+      for (const [label, value] of [["Tiếng Anh", question.correct_english], ["Đồng nghĩa", question.correct_synonym], ["Nghĩa tiếng Việt", question.correct_vietnamese]]) {
+        const detail = document.createElement("span");
+        detail.className = "quiz-vietnamese-meaning";
+        detail.textContent = `${label}: ${value || "—"}`;
+        feedback.append(document.createElement("br"), detail);
+      }
     }
     markComplete.hidden = !result.correct || result.completed || performance.now() - quiz.startedAt > 3000;
     next.hidden = false;
