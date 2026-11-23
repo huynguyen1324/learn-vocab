@@ -3,6 +3,7 @@ import json
 import math
 import os
 import random
+import re
 import sqlite3
 import unicodedata
 import uuid
@@ -63,6 +64,8 @@ CREATE TABLE IF NOT EXISTS synonymous_collocations (
     repetition_level INTEGER NOT NULL DEFAULT 0 CHECK (repetition_level BETWEEN 0 AND 8),
     practice_count INTEGER NOT NULL DEFAULT 0 CHECK (practice_count >= 0),
     next_review_at TEXT,
+    english_pattern TEXT NOT NULL DEFAULT '',
+    synonym_pattern TEXT NOT NULL DEFAULT '',
     UNIQUE (english COLLATE NOCASE, synonym COLLATE NOCASE)
 );
 """
@@ -93,6 +96,44 @@ def add_months(value, months):
     month = month_index % 12 + 1
     day = min(value.day, calendar.monthrange(year, month)[1])
     return value.replace(year=year, month=month, day=day)
+
+
+def synonym_patterns(english, synonym):
+    def words(text):
+        return [(match.group(), match.start(), match.end())
+                for match in re.finditer(r"\w+", text, flags=re.UNICODE)]
+
+    left, right = words(english), words(synonym)
+    longest, matches = 0, []
+    for li in range(len(left)):
+        for ri in range(len(right)):
+            size = 0
+            while (li + size < len(left) and ri + size < len(right)
+                   and left[li + size][0].casefold() == right[ri + size][0].casefold()):
+                size += 1
+            if size >= 2:
+                if size > longest:
+                    longest, matches = size, [(li, ri)]
+                elif size == longest:
+                    matches.append((li, ri))
+    if not longest or len({tuple(left[li + i][0].casefold() for i in range(longest)) for li, _ in matches}) != 1:
+        return english, synonym
+
+    common = tuple(left[matches[0][0] + i][0].casefold() for i in range(longest))
+
+    def replace_all(text, tokens):
+        spans, index = [], 0
+        while index + longest <= len(tokens):
+            if tuple(tokens[index + i][0].casefold() for i in range(longest)) == common:
+                spans.append((tokens[index][1], tokens[index + longest - 1][2]))
+                index += longest
+            else:
+                index += 1
+        for start, end in reversed(spans):
+            text = text[:start] + "..." + text[end:]
+        return text
+
+    return replace_all(english, left), replace_all(synonym, right)
 
 
 def next_review_for_count(count, answered_at):
@@ -154,6 +195,14 @@ def create_app(test_config=None):
         synonym_columns = {row[1] for row in connection.execute("PRAGMA table_info(synonymous_collocations)")}
         if "vietnamese" not in synonym_columns:
             connection.execute("ALTER TABLE synonymous_collocations ADD COLUMN vietnamese TEXT NOT NULL DEFAULT ''")
+        if "english_pattern" not in synonym_columns:
+            connection.execute("ALTER TABLE synonymous_collocations ADD COLUMN english_pattern TEXT NOT NULL DEFAULT ''")
+        if "synonym_pattern" not in synonym_columns:
+            connection.execute("ALTER TABLE synonymous_collocations ADD COLUMN synonym_pattern TEXT NOT NULL DEFAULT ''")
+        for row in connection.execute("SELECT id, english, synonym FROM synonymous_collocations").fetchall():
+            english_pattern, synonym_pattern = synonym_patterns(row["english"], row["synonym"])
+            connection.execute("UPDATE synonymous_collocations SET english_pattern = ?, synonym_pattern = ? WHERE id = ?",
+                               (english_pattern, synonym_pattern, row["id"]))
         connection.execute("CREATE UNIQUE INDEX IF NOT EXISTS vocabulary_english_unique ON vocabulary (lower(english))")
         columns = {row[1] for row in connection.execute("PRAGMA table_info(review_state)")}
         if "practice_day" not in columns and "batch_day" in columns:
@@ -488,11 +537,18 @@ def create_app(test_config=None):
             next_review_at = local_now().isoformat()
             with transaction() as db:
                 reject_duplicate_english(table, english, meaning if meaning_field == "synonym" else None)
-                cursor = db.execute(
-                    f"INSERT INTO {table} (english, {meaning_field}{', vietnamese' if meaning_field == 'synonym' else ''}, repetition_level, next_review_at) "
-                    f"VALUES (?, ?{', ?' if meaning_field == 'synonym' else ''}, 0, ?) RETURNING id",
-                    (english, meaning, vietnamese, next_review_at) if meaning_field == "synonym" else (english, meaning, next_review_at),
-                ).fetchone()
+                if table == "synonymous_collocations":
+                    english_pattern, synonym_pattern = synonym_patterns(english, meaning)
+                    cursor = db.execute(
+                        "INSERT INTO synonymous_collocations (english, synonym, vietnamese, english_pattern, synonym_pattern, repetition_level, next_review_at) "
+                        "VALUES (?, ?, ?, ?, ?, 0, ?) RETURNING id",
+                        (english, meaning, vietnamese, english_pattern, synonym_pattern, next_review_at),
+                    ).fetchone()
+                else:
+                    cursor = db.execute(
+                        f"INSERT INTO {table} (english, vietnamese, repetition_level, next_review_at) VALUES (?, ?, 0, ?) RETURNING id",
+                        (english, meaning, next_review_at),
+                    ).fetchone()
         except ValueError as error:
             return jsonify(error=str(error)), 400
         except DuplicateEnglishError as error:
@@ -594,10 +650,15 @@ def create_app(test_config=None):
             meaning = unicodedata.normalize("NFC", required_text(data.get(meaning_field), "Cụm từ đồng nghĩa" if meaning_field == "synonym" else "Nghĩa tiếng Việt")).lower()
             vietnamese = unicodedata.normalize("NFC", required_text(data.get("vietnamese"), "Nghĩa tiếng Việt")) if meaning_field == "synonym" else meaning
             reject_duplicate_english(table, english, meaning if meaning_field == "synonym" else None, word_id)
-            db.execute(
-                f"UPDATE {table} SET english = ?, {meaning_field} = ?{', vietnamese = ?' if meaning_field == 'synonym' else ''} WHERE id = ?",
-                (english, meaning, vietnamese, word_id) if meaning_field == "synonym" else (english, meaning, word_id),
-            )
+            if table == "synonymous_collocations":
+                english_pattern, synonym_pattern = synonym_patterns(english, meaning)
+                db.execute(
+                    "UPDATE synonymous_collocations SET english = ?, synonym = ?, vietnamese = ?, english_pattern = ?, synonym_pattern = ? WHERE id = ?",
+                    (english, meaning, vietnamese, english_pattern, synonym_pattern, word_id),
+                )
+            else:
+                db.execute(f"UPDATE {table} SET english = ?, vietnamese = ? WHERE id = ?",
+                           (english, meaning, word_id))
         except ValueError as error:
             return jsonify(error=str(error)), 400
         except DuplicateEnglishError as error:
@@ -635,25 +696,56 @@ def create_app(test_config=None):
             return jsonify(error="Chế độ quiz không hợp lệ."), 400
         with transaction() as db:
             meaning_field = "synonym" if table == "synonymous_collocations" else "vietnamese"
-            words = db.execute(f"SELECT id, english, {meaning_field} FROM {table} ORDER BY id").fetchall()
+            english_field = "english_pattern" if table == "synonymous_collocations" else "english"
+            choice_field = "synonym_pattern" if table == "synonymous_collocations" else meaning_field
+            words = db.execute(f"SELECT id, {english_field} AS english, {choice_field} AS {meaning_field}, repetition_level FROM {table} ORDER BY id").fetchall()
             if len(words) < 8:
                 return jsonify(error=f"Cần ít nhất 8 mục trong bảng {table} để bắt đầu quiz."), 400
             round_id, due_words = begin_round(db, "quiz", mode, request.args.get("hard") == "1", table)
             questions = []
             for word in due_words:
-                distractors = db.execute(
-                    f"SELECT id, english, {meaning_field} FROM {table} WHERE id != ? ORDER BY RANDOM() LIMIT 7",
-                    (word["id"],),
-                ).fetchall()
+                if table == "synonymous_collocations":
+                    word = db.execute(
+                        "SELECT id, english_pattern AS english, synonym_pattern AS synonym, repetition_level FROM synonymous_collocations WHERE id = ?",
+                        (word["id"],),
+                    ).fetchone()
+                    group = ("leading" if word["english"].startswith("...") or word["synonym"].startswith("...")
+                             else "trailing" if word["english"].endswith("...") or word["synonym"].endswith("...")
+                             else "none")
+                    matching = db.execute(
+                        "SELECT id, english_pattern AS english, synonym_pattern AS synonym FROM synonymous_collocations "
+                        "WHERE id != ? AND CASE WHEN english_pattern LIKE '...%' OR synonym_pattern LIKE '...%' THEN 'leading' "
+                        "WHEN english_pattern LIKE '%...' OR synonym_pattern LIKE '%...' THEN 'trailing' ELSE 'none' END = ? "
+                        "ORDER BY RANDOM() LIMIT 7",
+                        (word["id"], group),
+                    ).fetchall()
+                    distractors = list(matching)
+                    if len(distractors) < 7:
+                        placeholders = ",".join("?" for _ in [word["id"], *[item["id"] for item in distractors]])
+                        distractors.extend(db.execute(
+                            f"SELECT id, english_pattern AS english, synonym_pattern AS synonym FROM synonymous_collocations "
+                            f"WHERE id NOT IN ({placeholders}) ORDER BY RANDOM() LIMIT ?",
+                            (word["id"], *[item["id"] for item in distractors], 7 - len(distractors)),
+                        ).fetchall())
+                else:
+                    distractors = db.execute(
+                        f"SELECT id, english, {meaning_field} FROM {table} WHERE id != ? ORDER BY RANDOM() LIMIT 7",
+                        (word["id"],),
+                    ).fetchall()
                 choices = list(distractors) + [word]
                 random.shuffle(choices)
                 db.execute("UPDATE review_round_words SET choice_ids = ? WHERE word_id = ?",
                            (json.dumps([choice["id"] for choice in choices]), word["id"]))
-                questions.append({
+                question = {
                     "word_id": word["id"], "prompt": word["english"] if mode == "av" else word[meaning_field],
                     "repetition_level_after_correct": min(word["repetition_level"] + 2, 8),
                     "choices": [{"id": choice["id"], "text": choice[meaning_field if mode == "av" else "english"]} for choice in choices],
-                })
+                }
+                if table == "synonymous_collocations":
+                    question["correct_vietnamese"] = db.execute(
+                        "SELECT vietnamese FROM synonymous_collocations WHERE id = ?", (word["id"],)
+                    ).fetchone()["vietnamese"]
+                questions.append(question)
         return jsonify(round_id=round_id, questions=questions)
 
     @app.post("/api/quiz/answer")

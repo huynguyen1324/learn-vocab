@@ -474,6 +474,7 @@ test("quiz counts only each shown question, never distractors or answers", async
   const answer = h.run("submitAnswer(1)");
   h.requests.at(-1).respond({ correct: true, correct_option_ids: [1], completed: false });
   await answer;
+  assert.equal(h.el("feedback").children.length, 0);
   assert.equal(practiceRequests(h).length, 1);
   await h.el("next-question").fire("click");
   assert.equal(practiceRequests(h).length, 2);
@@ -540,6 +541,7 @@ test("phrase list has filtered numbering, mastery, practice count, warning thres
   assert.match(html, /Danh sách cụm từ/);
   assert.match(html, /Danh sách cụm từ đồng nghĩa/);
   assert.match(html, /Mức thông thạo/);
+  assert.match(fs.readFileSync(path.join(root, "static/style.css"), "utf8"), /#question-stage\s*\{[^}]*margin: auto 0 0\.4rem/s);
 });
 
 test("synonym list renders Vietnamese gloss and eight-column actions layout", async () => {

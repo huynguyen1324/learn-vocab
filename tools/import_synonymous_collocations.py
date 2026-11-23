@@ -1,9 +1,15 @@
 import re
 import sqlite3
 import sys
+
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+if __package__ in {None, ""}:
+    sys.path.insert(0, str(ROOT))
+
+from app import synonym_patterns
+
 SOURCE = ROOT / "tools" / "synonymous_collocations.md"
 DATABASE = ROOT / "instance" / "vocabulary.sqlite3"
 ENTRY = re.compile(r"^\d+$")
@@ -39,6 +45,7 @@ def parse_synonymous_collocations(text):
 def import_synonymous_collocations(source=SOURCE, database=DATABASE):
     entries = parse_synonymous_collocations(Path(source).read_text(encoding="utf-8-sig"))
     connection = sqlite3.connect(database)
+    connection.row_factory = sqlite3.Row
     try:
         connection.execute("BEGIN IMMEDIATE")
         connection.execute("""CREATE TABLE IF NOT EXISTS synonymous_collocations (
@@ -49,15 +56,25 @@ def import_synonymous_collocations(source=SOURCE, database=DATABASE):
             repetition_level INTEGER NOT NULL DEFAULT 0 CHECK (repetition_level BETWEEN 0 AND 8),
             practice_count INTEGER NOT NULL DEFAULT 0 CHECK (practice_count >= 0),
             next_review_at TEXT,
+            english_pattern TEXT NOT NULL DEFAULT '',
+            synonym_pattern TEXT NOT NULL DEFAULT '',
             UNIQUE (english COLLATE NOCASE, synonym COLLATE NOCASE)
         )""")
         columns = {row[1] for row in connection.execute("PRAGMA table_info(synonymous_collocations)")}
         if "vietnamese" not in columns:
             connection.execute("ALTER TABLE synonymous_collocations ADD COLUMN vietnamese TEXT NOT NULL DEFAULT ''")
+        if "english_pattern" not in columns:
+            connection.execute("ALTER TABLE synonymous_collocations ADD COLUMN english_pattern TEXT NOT NULL DEFAULT ''")
+        if "synonym_pattern" not in columns:
+            connection.execute("ALTER TABLE synonymous_collocations ADD COLUMN synonym_pattern TEXT NOT NULL DEFAULT ''")
+        for row in connection.execute("SELECT id, english, synonym FROM synonymous_collocations").fetchall():
+            english_pattern, synonym_pattern = synonym_patterns(row["english"], row["synonym"])
+            connection.execute("UPDATE synonymous_collocations SET english_pattern = ?, synonym_pattern = ? WHERE id = ?",
+                               (english_pattern, synonym_pattern, row["id"]))
         before = connection.total_changes
         connection.executemany(
-            "INSERT OR IGNORE INTO synonymous_collocations (english, synonym, vietnamese, repetition_level, practice_count) VALUES (?, ?, ?, 0, 0)",
-            entries,
+            "INSERT OR IGNORE INTO synonymous_collocations (english, synonym, vietnamese, english_pattern, synonym_pattern, repetition_level, practice_count) VALUES (?, ?, ?, ?, ?, 0, 0)",
+            [(english, synonym, vietnamese, *synonym_patterns(english, synonym)) for english, synonym, vietnamese in entries],
         )
         imported = connection.total_changes - before
         connection.commit()

@@ -360,7 +360,7 @@ dialog form {
 }
 
 #question-stage {
-  margin: auto 0 0;
+  margin: auto 0 0.4rem;
 }
 
 .choices {
@@ -387,6 +387,12 @@ dialog form {
 
 #feedback {
   margin: 1rem 0 0;
+}
+
+.quiz-vietnamese-meaning {
+  display: inline-block;
+  margin-top: 0.35rem;
+  color: #46515e;
 }
 
 .quiz-actions {

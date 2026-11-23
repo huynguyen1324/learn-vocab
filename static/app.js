@@ -422,6 +422,12 @@ async function submitAnswer(selectedId) {
     feedback.textContent = result.correct
       ? `Chính xác. Đáp án đúng: ${correctWords.join(", ")}.`
       : `Chưa chính xác. Đáp án đúng: ${correctWords.join(", ")}.`;
+    if (quiz.table === "synonymous_collocations" && question.correct_vietnamese) {
+      const vietnamese = document.createElement("span");
+      vietnamese.className = "quiz-vietnamese-meaning";
+      vietnamese.textContent = `Nghĩa tiếng Việt: ${question.correct_vietnamese}`;
+      feedback.append(document.createElement("br"), vietnamese);
+    }
     markComplete.hidden = !result.correct || result.completed || performance.now() - quiz.startedAt > 3000;
     next.hidden = false;
     next.textContent = "Tiếp theo";
