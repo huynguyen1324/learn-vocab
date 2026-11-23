@@ -7,9 +7,9 @@ from contextlib import closing, redirect_stdout
 from pathlib import Path
 from unittest.mock import Mock, patch
 
-from tools.export_db_vocab import export_vocabulary
-from tools.import_collocations import import_collocations, parse_collocations
-from tools.transform_input_vocab_into_collocations import generate_collocations, waiting_for_ai
+from tools.deprecated.export_db_vocab import export_vocabulary
+from tools.berangaria_import_collocations import import_collocations, parse_collocations
+from tools.berangaria_transform_input_vocab_into_collocations import generate_collocations, waiting_for_ai
 
 
 class CollocationScriptTests(unittest.TestCase):
@@ -26,15 +26,15 @@ class CollocationScriptTests(unittest.TestCase):
     def test_defaults_follow_repository_layout_not_current_directory(self):
         root = Path(__file__).resolve().parents[1]
         self.assertEqual(export_vocabulary.__defaults__, (root / "instance" / "vocabulary.sqlite3", root / "tools" / "input_vocab.txt"))
-        self.assertEqual(import_collocations.__defaults__, (root / "tools" / "output_collocations.txt", root / "instance" / "vocabulary.sqlite3"))
-        self.assertEqual(generate_collocations.__defaults__, (root / "tools" / "input_vocab.txt", root / "tools" / "output_collocations.txt", root / "config.json", root / "USER_DESCRIPTION.md"))
+        self.assertEqual(import_collocations.__defaults__, (root / "tools" / "berangaria_output_collocations.txt", root / "instance" / "vocabulary.sqlite3"))
+        self.assertEqual(generate_collocations.__defaults__, (root / "tools" / "berangaria_input_vocab.txt", root / "tools" / "berangaria_output_collocations.txt", root / "config.json", root / "USER_DESCRIPTION.md"))
 
     def test_waiting_log_reports_elapsed_and_stops_on_success_or_error(self):
         for fail in (False, True):
             stopped = Mock()
             stopped.wait.side_effect = [False, True]
             output = io.StringIO()
-            with patch("tools.transform_input_vocab_into_collocations.Event", return_value=stopped), patch("tools.transform_input_vocab_into_collocations.time.perf_counter", return_value=25), redirect_stdout(output):
+            with patch("tools.berangaria_transform_input_vocab_into_collocations.Event", return_value=stopped), patch("tools.berangaria_transform_input_vocab_into_collocations.time.perf_counter", return_value=25), redirect_stdout(output):
                 try:
                     with waiting_for_ai(5):
                         if fail:
@@ -49,6 +49,7 @@ class CollocationScriptTests(unittest.TestCase):
     def test_export_matches_pairs_and_does_not_change_db(self):
         with closing(sqlite3.connect(self.db)) as db:
             db.execute("CREATE TABLE vocabulary (id INTEGER PRIMARY KEY, english TEXT, vietnamese TEXT)")
+            db.execute("CREATE TABLE collocations (id INTEGER PRIMARY KEY, english TEXT, vietnamese TEXT, repetition_level INTEGER DEFAULT 0, practice_count INTEGER DEFAULT 0, next_review_at TEXT)")
             db.executemany("INSERT INTO vocabulary VALUES (?, ?, ?)", [(1, "lease", "thuê"), (2, "book", "sách")])
             db.commit()
         before = self.db.read_bytes()
@@ -66,6 +67,8 @@ class CollocationScriptTests(unittest.TestCase):
 
     def test_import_idempotent_keeps_progress_and_has_exact_fields(self):
         self.output.write_text("Sign a lease\nKý hợp đồng thuê\n\nlease property\ncho thuê bất động sản\n", encoding="utf-8")
+        from app import create_app
+        create_app({"DATABASE": str(self.db)})
         self.assertEqual(import_collocations(self.output, self.db), (2, 0))
         with closing(sqlite3.connect(self.db)) as db:
             self.assertEqual([r[1] for r in db.execute("PRAGMA table_info(collocations)")],
@@ -113,7 +116,7 @@ class CollocationScriptTests(unittest.TestCase):
                   {"source_id": 1, "english": "lease property", "vietnamese": "cho thuê bất động sản"}]
         response = {"choices": [{"message": {"content": json.dumps(answer)}}]}
         log = io.StringIO()
-        with patch("tools.transform_input_vocab_into_collocations.urlopen", return_value=io.BytesIO(json.dumps(response).encode())) as mock, redirect_stdout(log):
+        with patch("tools.berangaria_transform_input_vocab_into_collocations.urlopen", return_value=io.BytesIO(json.dumps(response).encode())) as mock, redirect_stdout(log):
             self.assertEqual(generate_collocations(self.input, self.output, self.config), 2)
         self.assertIn("Response received", log.getvalue())
         self.assertIn("Saved 2 collocations", log.getvalue())
@@ -130,7 +133,7 @@ class CollocationScriptTests(unittest.TestCase):
         self.input.write_text("".join(f"word-{i}\nnghĩa {i}\n" for i in range(835)), encoding="utf-8")
         answer = [{"source_id": i, "english": f"use word {i}", "vietnamese": f"dùng từ {i}"} for i in range(1, 836)]
         response = {"choices": [{"finish_reason": "stop", "message": {"content": json.dumps(answer)}}]}
-        with patch("tools.transform_input_vocab_into_collocations.urlopen", return_value=io.BytesIO(json.dumps(response).encode())) as mock, redirect_stdout(io.StringIO()):
+        with patch("tools.berangaria_transform_input_vocab_into_collocations.urlopen", return_value=io.BytesIO(json.dumps(response).encode())) as mock, redirect_stdout(io.StringIO()):
             self.assertEqual(generate_collocations(self.input, self.output, self.config), 835)
         mock.assert_called_once()
         payload = json.loads(mock.call_args.args[0].data)
@@ -146,7 +149,7 @@ class CollocationScriptTests(unittest.TestCase):
         for source_id, finish in ((1, "stop"), (True, "stop"), (3, "stop"), (1, "length")):
             answer = [{"source_id": source_id, "english": "one item", "vietnamese": "một mục"}]
             response = {"choices": [{"finish_reason": finish, "message": {"content": json.dumps(answer)}}]}
-            with patch("tools.transform_input_vocab_into_collocations.urlopen", return_value=io.BytesIO(json.dumps(response).encode())), redirect_stdout(io.StringIO()):
+            with patch("tools.berangaria_transform_input_vocab_into_collocations.urlopen", return_value=io.BytesIO(json.dumps(response).encode())), redirect_stdout(io.StringIO()):
                 with self.assertRaises(ValueError):
                     generate_collocations(self.input, self.output, self.config)
             self.assertEqual(self.output.read_text(encoding="utf-8"), "preserve")
@@ -156,7 +159,7 @@ class CollocationScriptTests(unittest.TestCase):
         self.output.write_text("preserve", encoding="utf-8")
         for content in ("not json", "[]", '[{"source_id":1,"english":"a\\nb","vietnamese":"nghĩa"}]'):
             response = {"choices": [{"message": {"content": content}}]}
-            with patch("tools.transform_input_vocab_into_collocations.urlopen", return_value=io.BytesIO(json.dumps(response).encode())):
+            with patch("tools.berangaria_transform_input_vocab_into_collocations.urlopen", return_value=io.BytesIO(json.dumps(response).encode())):
                 with self.assertRaises(ValueError):
                     generate_collocations(self.input, self.output, self.config)
             self.assertEqual(self.output.read_text(encoding="utf-8"), "preserve")

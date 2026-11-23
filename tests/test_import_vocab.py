@@ -3,7 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from tools.import_vocab import import_vocabulary, parse_toeic_vocab
+from tools.import_toeic_vocab import import_vocabulary, parse_toeic_vocab
 
 
 class ImportVocabularyTests(unittest.TestCase):

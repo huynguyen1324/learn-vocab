@@ -59,6 +59,7 @@ function setup() {
   el("word-form").elements = { english: new Element(), vietnamese: new Element() };
   const headers = [...html.matchAll(/<th[^>]*data-sort="([^"]+)"/g)].map(match => { const header = new Element(); header.dataset.sort = match[1]; return header; });
   const requests = [];
+  const discards = [];
   const timers = new Map();
   let now = 0;
   let timerId = 0;
@@ -81,12 +82,18 @@ function setup() {
     performance: { now: () => now },
     setInterval: (callback) => { timers.set(++timerId, callback); return timerId; },
     clearInterval: (id) => timers.delete(id),
-    fetch: (url, options) => new Promise((resolve, reject) => {
-      requests.push({
-        url, options, reject,
-        respond: (data, ok = true) => resolve({ ok, json: async () => data }),
+    fetch: (url, options) => {
+      if (url === "/api/review/discard") {
+        discards.push(options);
+        return Promise.resolve({ ok: true, json: async () => ({ discarded: true }) });
+      }
+      return new Promise((resolve, reject) => {
+        requests.push({
+          url, options, reject,
+          respond: (data, ok = true) => resolve({ ok, json: async () => data }),
+        });
       });
-    }),
+    },
   });
   vm.runInContext(source, context);
   const run = (code) => vm.runInContext(code, context);
@@ -94,7 +101,7 @@ function setup() {
     now += milliseconds;
     for (const callback of [...timers.values()]) callback();
   };
-  return { el, run, requests, timers, tick, headers };
+  return { el, run, requests, discards, timers, tick, headers };
 }
 
 const flush = async () => { for (let i = 0; i < 10; i++) await Promise.resolve(); };
@@ -125,13 +132,14 @@ async function startFlash(h) {
 const tests = [];
 function test(name, body) { tests.push({ name, body }); }
 
-test("leaving flashcards cancels timer and requires a fresh start", async () => {
+test("leaving flashcards cancels timer and discards the round without changing the card schedule", async () => {
   const h = setup();
   await startFlash(h);
   assert.equal(h.timers.size, 1);
   h.run('showView("quiz")');
   assert.equal(h.timers.size, 0);
   assert.equal(h.el("flashcard-panel").hidden, true);
+  assert.deepEqual(JSON.parse(h.discards[0].body), { round_id: "round-1" });
   const count = h.requests.length;
   h.tick(21000);
   await flush();
@@ -320,8 +328,13 @@ for (const phase of ["start", "answer"]) {
         pending = h.run("submitAnswer(1)");
       }
       h.run('showView("flashcard"); showView("quiz")');
-      h.requests.at(-1).respond(fail ? { error: "stale" } : phase === "start" ? { questions } : { correct: true, correct_option_ids: [1] }, !fail);
+      if (phase === "start") {
+        h.requests.at(-1).respond(fail ? { error: "stale" } : { round_id: "stale-round", questions }, !fail);
+      } else {
+        h.requests.at(-1).respond(fail ? { error: "stale" } : { correct: true, correct_option_ids: [1] }, !fail);
+      }
       await pending;
+      if (phase === "start" && !fail) assert.deepEqual(JSON.parse(h.discards[0].body), { round_id: "stale-round" });
       assert.equal(h.el("quiz-panel").hidden, true);
       assert.equal(h.el("notice").textContent, "");
       assert.equal(h.el("feedback").textContent, "");
@@ -508,6 +521,7 @@ test("phrase list has filtered numbering, mastery, practice count, warning thres
   h.run("renderWords([])");
   assert.equal(h.el("word-list").children[0].children[0].colSpan, 7);
   assert.match(html, /Danh sách cụm từ/);
+  assert.match(html, /Danh sách cụm từ đồng nghĩa/);
   assert.match(html, /Mức thông thạo/);
 });
 
@@ -547,11 +561,14 @@ test("rest notice and stats tab", async () => {
   assert.equal(h.el("stats-view").hidden, false);
   assert.equal(h.requests.at(-1).url, "/api/stats");
   h.requests.at(-1).respond({
+    collocations_stats: { total: 0, due: 0, upcoming: 0, completed: 0, hard: 0, mastery: 0, practice_count: 0 },
+    synonymous_collocations_stats: { total: 0, due: 0, upcoming: 0, completed: 0, hard: 0, mastery: 0, practice_count: 0 },
     vocabulary_stats: { total: 8, due: 2, upcoming: 3, completed: 3, hard: 1, mastery: 0.5, practice_count: 20 },
   });
   await flush();
-  assert.equal(h.el("stat-total").textContent, 8);
-  assert.match(h.el("stat-mastery").textContent, /50/);
+  assert.equal(h.el("collocation-stat-total").textContent, 0);
+  assert.equal(h.el("synonym-stat-total").textContent, "");
+  assert.equal(h.el("stat-total").textContent, "");
 });
 
 test("hard-review checkbox is sent only when ticked", async () => {

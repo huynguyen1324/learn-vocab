@@ -13,6 +13,7 @@
       <h1>Học cụm từ</h1>
       <nav aria-label="Điều hướng chính">
         <button id="list-tab" class="tab active" type="button">Danh sách cụm từ</button>
+        <button id="synonym-list-tab" class="tab" type="button">Danh sách cụm từ đồng nghĩa</button>
         <button id="vocab-list-tab" class="tab" type="button">Danh sách từ vựng</button>
         <button id="quiz-tab" class="tab" type="button">Ôn trắc nghiệm</button>
         <button id="flashcard-tab" class="tab" type="button">Ôn lật thẻ</button>
@@ -69,6 +70,26 @@
       </div>
     </section>
 
+    <section id="synonym-list-view" hidden>
+      <div class="section-heading">
+        <h2>Danh sách cụm từ đồng nghĩa</h2>
+        <button id="add-synonym-word" class="primary" type="button">Thêm cụm từ đồng nghĩa</button>
+      </div>
+      <div class="filters">
+        <label class="search-label">Tìm kiếm
+          <input id="synonym-search" type="search" placeholder="Cụm từ hoặc synonym tiếng Anh">
+        </label>
+        <label>Lọc theo lịch ôn
+          <select id="synonym-status-filter">
+            <option value="all">Tất cả</option><option value="due">Đến hạn</option><option value="upcoming">Chưa đến hạn</option><option value="completed">Đã hoàn thành</option><option value="hard">Từ khó ôn</option>
+          </select>
+        </label>
+      </div>
+      <div class="table-wrap"><table>
+        <thead><tr><th>STT</th><th data-sort="english" class="sortable">English</th><th>Synonym</th><th data-sort="repetition_level" class="sortable">Mức thông thạo</th><th data-sort="practice_count" class="sortable">Số lần ôn</th><th data-sort="next_review_at" class="sortable">Thời điểm ôn tiếp theo</th><th><span class="sr-only">Thao tác</span></th></tr></thead>
+        <tbody id="synonym-word-list"></tbody>
+      </table></div>
+    </section>
     <section id="vocab-list-view" hidden>
       <div class="section-heading">
         <h2>Danh sách từ vựng</h2>
@@ -128,6 +149,7 @@
         <label class="checkbox-label">
           <select id="quiz-table" class="table-select">
             <option value="collocations">Cụm từ</option>
+            <option value="synonymous_collocations">Cụm từ đồng nghĩa</option>
             <option value="vocabulary">Từ vựng</option>
           </select>
         </label>
@@ -168,6 +190,7 @@
         <label class="checkbox-label">
           <select id="flashcard-table" class="table-select">
             <option value="collocations">Cụm từ</option>
+            <option value="synonymous_collocations">Cụm từ đồng nghĩa</option>
             <option value="vocabulary">Từ vựng</option>
           </select>
         </label>
@@ -197,6 +220,14 @@
       </div>
     </section>
     <section id="stats-view" hidden>
+      <h2>Thống kê cụm từ</h2>
+      <dl id="collocation-stats-list" class="stats-list">
+        <div><dt>Tổng số từ</dt><dd id="collocation-stat-total">0</dd></div><div><dt>Số từ đến hạn</dt><dd id="collocation-stat-due">0</dd></div><div><dt>Số từ chưa đến hạn</dt><dd id="collocation-stat-upcoming">0</dd></div><div><dt>Số từ đã hoàn thành</dt><dd id="collocation-stat-completed">0</dd></div><div><dt>Số từ khó học</dt><dd id="collocation-stat-hard">0</dd></div><div><dt>Tổng mức thông thạo</dt><dd id="collocation-stat-mastery">0</dd></div><div><dt>Tổng số lần ôn</dt><dd id="collocation-stat-practice">0</dd></div>
+      </dl>
+      <h2>Thống kê cụm từ đồng nghĩa</h2>
+      <dl id="synonym-stats-list" class="stats-list">
+        <div><dt>Tổng số cụm</dt><dd id="synonym-stat-total">0</dd></div><div><dt>Số cụm đến hạn</dt><dd id="synonym-stat-due">0</dd></div><div><dt>Số cụm chưa đến hạn</dt><dd id="synonym-stat-upcoming">0</dd></div><div><dt>Số cụm đã hoàn thành</dt><dd id="synonym-stat-completed">0</dd></div><div><dt>Số cụm khó học</dt><dd id="synonym-stat-hard">0</dd></div><div><dt>Tổng mức thông thạo</dt><dd id="synonym-stat-mastery">0</dd></div><div><dt>Tổng số lần ôn</dt><dd id="synonym-stat-practice">0</dd></div>
+      </dl>
       <h2>Thống kê từ vựng</h2>
       <dl id="stats-list" class="stats-list">
         <div><dt>Tổng số từ</dt><dd id="stat-total">0</dd></div>
@@ -217,7 +248,7 @@
       <label>Cụm từ tiếng Anh
         <input name="english" maxlength="500" required autocomplete="off">
       </label>
-      <label>Nghĩa tiếng Việt
+      <label><span id="meaning-label">Nghĩa tiếng Việt</span>
         <input name="vietnamese" maxlength="500" required autocomplete="off">
       </label>
       <p id="form-error" class="error" role="alert"></p>

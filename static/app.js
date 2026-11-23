@@ -1,6 +1,7 @@
 const notice = document.querySelector("#notice");
 const wordList = document.querySelector("#word-list");
 const vocabWordList = document.querySelector("#vocab-word-list");
+const synonymWordList = document.querySelector("#synonym-word-list");
 const wordDialog = document.querySelector("#word-dialog");
 const wordForm = document.querySelector("#word-form");
 const formError = document.querySelector("#form-error");
@@ -51,14 +52,14 @@ function addCell(row, text) {
 
 function renderWords(items) {
   activeWords = items;
-  (activeListTable === "collocations" ? wordList : vocabWordList).replaceChildren();
-  const list = activeListTable === "collocations" ? wordList : vocabWordList;
+  const list = activeListTable === "collocations" ? wordList : activeListTable === "vocabulary" ? vocabWordList : synonymWordList;
+  list.replaceChildren();
   if (!items.length) {
     const row = document.createElement("tr");
     const cell = document.createElement("td");
     cell.colSpan = 7;
     cell.className = "empty";
-    cell.textContent = activeListTable === "collocations" ? "Không có cụm từ nào phù hợp." : "Không có từ vựng nào phù hợp.";
+    cell.textContent = activeListTable === "vocabulary" ? "Không có từ vựng nào phù hợp." : activeListTable === "synonymous_collocations" ? "Không có cụm từ đồng nghĩa nào phù hợp." : "Không có cụm từ nào phù hợp.";
     row.append(cell);
     list.append(row);
     return;
@@ -69,7 +70,7 @@ function renderWords(items) {
     row.classList.toggle("needs-practice", word.practice_count - word.repetition_level >= 3);
     addCell(row, index + 1);
     addCell(row, word.english);
-    addCell(row, word.vietnamese);
+    addCell(row, word[activeListTable === "synonymous_collocations" ? "synonym" : "vietnamese"]);
     addCell(row, word.status);
     addCell(row, word.practice_count);
     addCell(row, word.next_review_at ? formatDate(word.next_review_at) : "—");
@@ -104,10 +105,11 @@ function renderWords(items) {
 async function loadWords() {
   const request = ++wordRequest;
   const isVocab = activeListTable === "vocabulary";
+  const isSynonym = activeListTable === "synonymous_collocations";
   const params = new URLSearchParams({
     table: activeListTable,
-    q: document.querySelector(isVocab ? "#vocab-search" : "#search").value,
-    status: document.querySelector(isVocab ? "#vocab-status-filter" : "#status-filter").value,
+    q: document.querySelector(isVocab ? "#vocab-search" : isSynonym ? "#synonym-search" : "#search").value,
+    status: document.querySelector(isVocab ? "#vocab-status-filter" : isSynonym ? "#synonym-status-filter" : "#status-filter").value,
     sort_by: currentSortBy,
   });
   try {
@@ -126,17 +128,20 @@ function openWordDialog(word = null) {
   editingId = word ? word.id : null;
   wordForm.reset();
   formError.textContent = "";
-  const noun = activeListTable === "collocations" ? "cụm từ" : "từ vựng";
+  const isSynonym = activeListTable === "synonymous_collocations";
+  const noun = activeListTable === "collocations" ? "cụm từ" : isSynonym ? "cụm từ đồng nghĩa" : "từ vựng";
   document.querySelector("#dialog-title").textContent = word ? `Sửa ${noun}` : `Thêm ${noun}`;
-  document.querySelector("#dialog-type-label").textContent = `${noun[0].toUpperCase()}${noun.slice(1)} tiếng Anh`;
+  document.querySelector("#dialog-type-label").textContent = isSynonym ? "Cụm tiếng Anh và cụm đồng nghĩa" : `${noun[0].toUpperCase()}${noun.slice(1)} tiếng Anh`;
   wordForm.elements.english.value = word ? word.english : "";
-  wordForm.elements.vietnamese.value = word ? word.vietnamese : "";
+  wordForm.elements.vietnamese.value = word ? (isSynonym ? word.synonym : word.vietnamese) : "";
+  document.querySelector("#meaning-label").textContent = isSynonym ? "Cụm từ đồng nghĩa" : "Nghĩa tiếng Việt";
   wordDialog.showModal();
   wordForm.elements.english.focus();
 }
 
 document.querySelector("#add-word").addEventListener("click", () => openWordDialog());
 document.querySelector("#add-vocab-word").addEventListener("click", () => openWordDialog());
+document.querySelector("#add-synonym-word").addEventListener("click", () => openWordDialog());
 document.querySelector("#cancel-word").addEventListener("click", () => wordDialog.close());
 
 wordForm.addEventListener("submit", async (event) => {
@@ -144,7 +149,7 @@ wordForm.addEventListener("submit", async (event) => {
   formError.textContent = "";
   const data = {
     english: wordForm.elements.english.value,
-    vietnamese: wordForm.elements.vietnamese.value,
+    [activeListTable === "synonymous_collocations" ? "synonym" : "vietnamese"]: wordForm.elements.vietnamese.value,
   };
   try {
     const table = activeListTable;
@@ -160,7 +165,7 @@ wordForm.addEventListener("submit", async (event) => {
   }
 });
 
-for (const listElement of [wordList, vocabWordList]) listElement.addEventListener("click", async (event) => {
+for (const listElement of [wordList, vocabWordList, synonymWordList]) listElement.addEventListener("click", async (event) => {
   const button = event.target.closest("button[data-action]");
   if (!button) return;
   const word = activeWords.find((item) => item.id === Number(button.dataset.id));
@@ -169,7 +174,7 @@ for (const listElement of [wordList, vocabWordList]) listElement.addEventListene
     openWordDialog(word);
     return;
   }
-  const noun = activeListTable === "collocations" ? "cụm từ" : "từ vựng";
+  const noun = activeListTable === "collocations" ? "cụm từ" : activeListTable === "synonymous_collocations" ? "cụm từ đồng nghĩa" : "từ vựng";
   if (button.dataset.action === "restart" && !window.confirm(`Học lại "${word.english}" từ mốc 1? Tiến độ cũ sẽ bị xóa.`)) return;
   try {
     if (button.dataset.action === "delete") {
@@ -186,10 +191,10 @@ for (const listElement of [wordList, vocabWordList]) listElement.addEventListene
   }
 });
 
-for (const selector of ["#search", "#vocab-search"]) {
+for (const selector of ["#search", "#vocab-search", "#synonym-search"] ) {
   document.querySelector(selector).addEventListener("input", () => loadWords().catch((error) => showNotice(error.message, true)));
 }
-for (const selector of ["#status-filter", "#vocab-status-filter"]) {
+for (const selector of ["#status-filter", "#vocab-status-filter", "#synonym-status-filter"]) {
   document.querySelector(selector).addEventListener("change", () => loadWords().catch((error) => showNotice(error.message, true)));
 }
 
@@ -220,42 +225,54 @@ tableHeaders.forEach(header => {
 
 async function loadStats() {
   const data = await api("/api/stats");
-  const stats = data.vocabulary_stats;
-  document.querySelector("#stat-total").textContent = stats.total;
-  document.querySelector("#stat-due").textContent = stats.due;
-  document.querySelector("#stat-upcoming").textContent = stats.upcoming;
-  document.querySelector("#stat-completed").textContent = stats.completed;
-  document.querySelector("#stat-hard").textContent = stats.hard;
-  document.querySelector("#stat-mastery").textContent = stats.total ? stats.mastery.toLocaleString("vi-VN", { style: "percent", maximumFractionDigits: 1 }) : "0%";
-  document.querySelector("#stat-practice").textContent = stats.practice_count;
+  for (const [prefix, key] of [["collocation-", "collocations_stats"], ["synonym-", "synonymous_collocations_stats"], ["", "vocabulary_stats"]]) {
+    const stats = data[key];
+    for (const field of ["total", "due", "upcoming", "completed", "hard", "practice_count"]) {
+      const target = document.querySelector(`#${prefix}stat-${field}`);
+      if (target) target.textContent = stats[field];
+    }
+    const mastery = document.querySelector(`#${prefix}stat-mastery`);
+    if (mastery) mastery.textContent = stats.total ? stats.mastery.toLocaleString("vi-VN", { style: "percent", maximumFractionDigits: 1 }) : "0%";
+  }
 }
 
 function showView(view) {
   const isList = view === "list";
   const isVocabList = view === "vocab-list";
+  const isSynonymList = view === "synonym-list";
   const isQuiz = view === "quiz";
   const isFlashcard = view === "flashcard";
   const isStats = view === "stats";
   if (!isQuiz) {
     stopQuizTimer();
+    const roundId = quiz.roundId;
     quiz.generation += 1;
     quiz.questions = [];
+    quiz.roundId = null;
     document.querySelector("#quiz-panel").hidden = true;
+    if (roundId) api("/api/review/discard", { method: "POST", body: JSON.stringify({ round_id: roundId }) }).catch(() => {});
   }
-  if (!isFlashcard) resetFlashcards();
+  if (!isFlashcard) {
+    const roundId = flashcards.roundId;
+    resetFlashcards();
+    flashcards.roundId = null;
+    if (roundId) api("/api/review/discard", { method: "POST", body: JSON.stringify({ round_id: roundId }) }).catch(() => {});
+  }
   document.querySelector("#list-view").hidden = !isList;
   document.querySelector("#vocab-list-view").hidden = !isVocabList;
+  document.querySelector("#synonym-list-view").hidden = !isSynonymList;
   document.querySelector("#quiz-view").hidden = !isQuiz;
   document.querySelector("#flashcard-view").hidden = !isFlashcard;
   document.querySelector("#stats-view").hidden = !isStats;
   document.querySelector("#list-tab").classList.toggle("active", isList);
   document.querySelector("#vocab-list-tab").classList.toggle("active", isVocabList);
+  document.querySelector("#synonym-list-tab").classList.toggle("active", isSynonymList);
   document.querySelector("#quiz-tab").classList.toggle("active", isQuiz);
   document.querySelector("#flashcard-tab").classList.toggle("active", isFlashcard);
   document.querySelector("#stats-tab").classList.toggle("active", isStats);
   showNotice();
-  if (isList || isVocabList) {
-    activeListTable = isVocabList ? "vocabulary" : "collocations";
+  if (isList || isVocabList || isSynonymList) {
+    activeListTable = isVocabList ? "vocabulary" : isSynonymList ? "synonymous_collocations" : "collocations";
     loadWords().catch((error) => showNotice(error.message, true));
   }
   if (isStats) loadStats().catch((error) => showNotice(error.message, true));
@@ -263,6 +280,7 @@ function showView(view) {
 
 document.querySelector("#list-tab").addEventListener("click", () => showView("list"));
 document.querySelector("#vocab-list-tab").addEventListener("click", () => showView("vocab-list"));
+document.querySelector("#synonym-list-tab").addEventListener("click", () => showView("synonym-list"));
 document.querySelector("#quiz-tab").addEventListener("click", () => showView("quiz"));
 document.querySelector("#flashcard-tab").addEventListener("click", () => showView("flashcard"));
 document.querySelector("#stats-tab").addEventListener("click", () => showView("stats"));
@@ -416,6 +434,8 @@ async function submitAnswer(selectedId) {
 
 async function startQuiz(mode) {
   if (quiz.pending) return;
+  if (quiz.roundId) api("/api/review/discard", { method: "POST", body: JSON.stringify({ round_id: quiz.roundId }) }).catch(() => {});
+  quiz.roundId = null;
   resetFlashcards();
   stopQuizTimer();
   setRoundPending(quiz, "quiz", true);
@@ -428,14 +448,17 @@ async function startQuiz(mode) {
     const table = document.querySelector("#quiz-table").value || "collocations";
     quiz.table = table || "collocations";
     const data = await api(`/api/quiz/start?mode=${mode}${hard}&table=${table}`, { method: "POST" });
-    if (generation !== quiz.generation) return;
+    if (generation !== quiz.generation) {
+      api("/api/review/discard", { method: "POST", body: JSON.stringify({ round_id: data.round_id }) }).catch(() => {});
+      return;
+    }
     quiz.roundId = data.round_id;
     quiz.questions = data.questions;
     quiz.index = 0;
     quiz.correct = 0;
     if (!quiz.questions.length) {
       document.querySelector("#quiz-panel").hidden = true;
-      showNotice(`Hiện không có ${table === "vocabulary" ? "từ vựng" : "cụm từ nào"} đến hạn ôn.`);
+      showNotice(`Hiện không có ${table === "vocabulary" ? "từ vựng" : table === "synonymous_collocations" ? "cụm từ đồng nghĩa" : "cụm từ"} nào đến hạn ôn.`);
       return;
     }
     await renderQuestion();
@@ -645,6 +668,8 @@ async function renderFlashcard() {
 
 async function startFlashcards(mode) {
   if (flashcards.pending) return;
+  if (flashcards.roundId) api("/api/review/discard", { method: "POST", body: JSON.stringify({ round_id: flashcards.roundId }) }).catch(() => {});
+  flashcards.roundId = null;
   stopQuizTimer();
   quiz.generation += 1;
   quiz.questions = [];
@@ -658,13 +683,16 @@ async function startFlashcards(mode) {
     const table = document.querySelector("#flashcard-table").value || "collocations";
     flashcards.table = table;
     const data = await api(`/api/flashcard/start?mode=${mode}${hard}&table=${table}`, { method: "POST" });
-    if (generation !== flashcards.generation) return;
+    if (generation !== flashcards.generation) {
+      api("/api/review/discard", { method: "POST", body: JSON.stringify({ round_id: data.round_id }) }).catch(() => {});
+      return;
+    }
     flashcards.roundId = data.round_id;
     flashcards.cards = data.cards;
     flashcards.index = 0;
     if (!flashcards.cards.length) {
       document.querySelector("#flashcard-panel").hidden = true;
-      showNotice(`Hiện không có ${table === "vocabulary" ? "từ vựng" : "cụm từ nào"} đến hạn ôn.`);
+      showNotice(`Hiện không có ${table === "vocabulary" ? "từ vựng" : table === "synonymous_collocations" ? "cụm từ đồng nghĩa" : "cụm từ"} nào đến hạn ôn.`);
       return;
     }
     await renderFlashcard();

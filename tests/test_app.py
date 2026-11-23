@@ -295,7 +295,7 @@ class VocabularyAppTests(unittest.TestCase):
             self.insert_word(f"word-{index}", f"nghĩa {index}")
         response = self.client.post("/api/quiz/start?table=collocations")
         self.assertEqual(response.status_code, 400)
-        self.assertIn("ít nhất 8 từ", response.json["error"])
+        self.assertIn("ít nhất 8 mục", response.json["error"])
         self.assertEqual(
             add_months(datetime(2024, 1, 31, 9), 1),
             datetime(2024, 2, 29, 9),
@@ -316,6 +316,18 @@ class VocabularyAppTests(unittest.TestCase):
         for repetition_level, next_review in expected.items():
             with self.subTest(repetition_level=repetition_level):
                 self.assertEqual(next_review_for_count(repetition_level, answered_at), next_review)
+
+    def test_quiz_uses_one_correct_choice_and_seven_random_distractors(self):
+        target_id = self.insert_word("target", "đáp án đúng", repetition_level=0)
+        for index in range(11):
+            self.insert_word(f"other-{index}", f"đáp án sai {index}", due=False)
+
+        quiz = self.client.post("/api/quiz/start?mode=av&table=collocations")
+        question = next(q for q in quiz.json["questions"] if q["word_id"] == target_id)
+        options = {choice["id"]: choice["text"] for choice in question["choices"]}
+        self.assertEqual(len(options), 8)
+        self.assertEqual(options[target_id], "đáp án đúng")
+        self.assertEqual(sum(text.startswith("đáp án sai") for text in options.values()), 7)
 
     def test_quiz_av_mode_prompt_is_english_and_choices_are_vietnamese(self):
         target_id = self.insert_word("apple", "quả táo", repetition_level=0)
@@ -344,7 +356,7 @@ class VocabularyAppTests(unittest.TestCase):
         av = self.client.post("/api/flashcard/start?mode=av&table=collocations")
         va = self.client.post("/api/flashcard/start?mode=va&table=collocations")
         self.assertEqual(av.json["cards"], [{
-            "word_id": target_id, "front": "apple", "back": "quả táo", "repetition_level": 0,
+            "word_id": target_id, "front": "apple", "back": "quả táo", "repetition_level": 0, "first_review": True,
         }])
         self.assertEqual(va.json["cards"][0]["front"], "quả táo")
         self.assertEqual(va.json["cards"][0]["back"], "apple")

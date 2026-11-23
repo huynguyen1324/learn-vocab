@@ -55,6 +55,15 @@ CREATE TABLE IF NOT EXISTS vocabulary (
     practice_count INTEGER NOT NULL DEFAULT 0 CHECK (practice_count >= 0),
     next_review_at TEXT
 );
+CREATE TABLE IF NOT EXISTS synonymous_collocations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    english TEXT NOT NULL,
+    synonym TEXT NOT NULL,
+    repetition_level INTEGER NOT NULL DEFAULT 0 CHECK (repetition_level BETWEEN 0 AND 8),
+    practice_count INTEGER NOT NULL DEFAULT 0 CHECK (practice_count >= 0),
+    next_review_at TEXT,
+    UNIQUE (english COLLATE NOCASE, synonym COLLATE NOCASE)
+);
 """
 
 
@@ -105,48 +114,6 @@ def next_review_for_count(count, answered_at):
     if count == 7:
         return add_months(answered_at, 12)
     raise ValueError("Mốc repetition không hợp lệ.")
-
-
-# Interest keywords for personalized quiz distractors
-INTEREST_KEYWORDS = {
-    "gaming": ["game", "play", "winner", "score", "match", "team", "player", "champion", "win", "defeat"],
-    "swimming": ["swim", "water", "pool", "dive", "float", "stroke", "underwater"],
-    "badminton": ["badminton", "racket", "shuttle", "serve", "net", "court"],
-    "sports": ["sport", "athlete", "coach", "training", "competition", "exercise", "fitness"],
-    "history": ["history", "war", "battle", "king", "empire", "century", "ancient", "historical", "period"],
-    "economics": ["economy", "market", "price", "trade", "business", "profit", "cost", "economic", "commerce"],
-    "finance": ["finance", "bank", "investment", "stock", "debt", "loan", "capital", "money", "financial"],
-    "it": ["computer", "software", "program", "code", "internet", "technology", "data", "digital", "system"],
-}
-
-
-def score_word_by_interests(word_english, word_vietnamese):
-    """Score a word based on relevance to user's interests"""
-    score = 0
-    combined_text = f"{word_english} {word_vietnamese}".lower()
-
-    for category, keywords in INTEREST_KEYWORDS.items():
-        for keyword in keywords:
-            if keyword in combined_text:
-                score += 1
-
-    return score
-
-
-def select_distractors_with_interests(target_word_id, all_words, count=7):
-    """Select distractor words, prioritizing those related to user interests"""
-    candidates = [w for w in all_words if w["id"] != target_word_id]
-
-    # Score and sort by interest relevance
-    scored = [
-        (w, score_word_by_interests(w["english"], w["vietnamese"]))
-        for w in candidates
-    ]
-    scored.sort(key=lambda x: x[1], reverse=True)
-
-    # Return top scoring words, or all if not enough candidates
-    result_count = min(count, len(scored))
-    return [w[0] for w in scored[:result_count]]
 
 
 def normalize_meaning(value):
@@ -231,21 +198,24 @@ def create_app(test_config=None):
     def get_table_from_request():
         """Lấy và validate tham số ?table= từ request. Bắt buộc phải có."""
         table = request.args.get("table")
-        if table not in {"collocations", "vocabulary"}:
-            raise ValueError("Thiếu hoặc không hợp lệ tham số table (collocations/vocabulary).")
+        if table not in {"collocations", "vocabulary", "synonymous_collocations"}:
+            raise ValueError("Thiếu hoặc không hợp lệ tham số table (collocations/vocabulary/synonymous_collocations).")
         return table
 
     def get_table_from_state(state):
         """Lấy bảng dữ liệu từ review_state, mặc định collocations."""
         table = state["source_table"] if state and state["source_table"] else "collocations"
-        if table not in {"collocations", "vocabulary"}:
+        if table not in {"collocations", "vocabulary", "synonymous_collocations"}:
             table = "collocations"
         return table
 
-    def reject_duplicate_english(table, english, word_id=None):
-        for row in get_db().execute(f"SELECT id, english FROM {table}"):
-            if row["id"] != word_id and unicodedata.normalize("NFC", row["english"]).casefold() == english.casefold():
-                raise DuplicateEnglishError("Từ tiếng Anh này đã có trong danh sách.")
+    def reject_duplicate_english(table, english, synonym=None, word_id=None):
+        meaning_field = "synonym" if table == "synonymous_collocations" else "vietnamese"
+        for row in get_db().execute(f"SELECT id, english, {meaning_field} FROM {table}"):
+            same_english = unicodedata.normalize("NFC", row["english"]).casefold() == english.casefold()
+            same_meaning = synonym is None or unicodedata.normalize("NFC", row[meaning_field]).casefold() == synonym.casefold()
+            if row["id"] != word_id and same_english and same_meaning:
+                raise DuplicateEnglishError("Cặp cụm từ này đã có trong danh sách." if table == "synonymous_collocations" else "Từ tiếng Anh này đã có trong danh sách.")
 
     @contextmanager
     def transaction():
@@ -299,8 +269,10 @@ def create_app(test_config=None):
         word = db.execute(f"SELECT * FROM {table} WHERE id = ?", (word_id,)).fetchone()
         if word is None:
             raise NotFound("Không tìm thấy từ vựng.")
-        if word["next_review_at"] is None or (word["next_review_at"] > local_now().isoformat()
-                and not (word["repetition_level"] == 0 and (word["practice_count"] == 0 or item["shown"]))):
+        due = ((word["repetition_level"] == 0 and word["practice_count"] == 0)
+               or (word["next_review_at"] is not None and word["next_review_at"] <= local_now().isoformat())
+               or (word["repetition_level"] == 0 and item["shown"]))
+        if not due:
             raise Conflict("Từ này không còn đến hạn ôn.")
         return word, item
 
@@ -323,7 +295,7 @@ def create_app(test_config=None):
         elif first_review and result == "relative":
             level = 1
         elif first_review and result == "correct":
-            level = 2
+            level = 2 if elapsed <= 5000 else 1
         elif result != "relative":
             fail = result in {"wrong", "timeout"}
             if level > 0:
@@ -370,6 +342,24 @@ def create_app(test_config=None):
         db.executemany("INSERT INTO review_round_words (word_id) VALUES (?)", [(row["id"],) for row in rows])
         return round_id, rows
 
+    @app.post("/api/review/discard")
+    def discard_review():
+        try:
+            data = payload()
+            round_id = data.get("round_id")
+            if not isinstance(round_id, str) or not round_id:
+                raise ValueError("Thiếu round_id hợp lệ.")
+            with transaction() as db:
+                state = db.execute("SELECT round_id FROM review_state WHERE singleton = 1").fetchone()
+                if state is None or state["round_id"] != round_id:
+                    return jsonify(discarded=False)
+                db.execute("DELETE FROM review_receipts")
+                db.execute("DELETE FROM review_round_words")
+                db.execute("UPDATE review_state SET round_id = NULL, round_kind = NULL, round_mode = NULL WHERE singleton = 1")
+            return jsonify(discarded=True)
+        except ValueError as error:
+            return jsonify(error=str(error)), 400
+
     @app.get("/")
     def index():
         return render_template("index.html")
@@ -401,13 +391,14 @@ def create_app(test_config=None):
         search = request.args.get("q", "").strip().casefold()
         now = local_now().isoformat()
         # shortcut: filters scan the full personal vocabulary; use indexed search if datasets grow large.
+        meaning_field = "synonym" if table == "synonymous_collocations" else "vietnamese"
         rows = get_db().execute(
-            f"SELECT id, english, vietnamese, repetition_level, practice_count, next_review_at "
+            f"SELECT id, english, {meaning_field}, repetition_level, practice_count, next_review_at "
             f"FROM {table} ORDER BY {order_clause}"
         ).fetchall()
         result = []
         for row in rows:
-            if search and search not in row["english"].casefold() and search not in row["vietnamese"].casefold():
+            if search and search not in row["english"].casefold() and search not in row[meaning_field].casefold():
                 continue
             completed = row["repetition_level"] == 8 and row["next_review_at"] is None
             due = row["next_review_at"] is not None and (row["next_review_at"] <= now
@@ -424,7 +415,7 @@ def create_app(test_config=None):
             result.append({
                 "id": row["id"],
                 "english": row["english"],
-                "vietnamese": row["vietnamese"],
+                meaning_field: row[meaning_field],
                 "repetition_level": row["repetition_level"],
                 "practice_count": row["practice_count"],
                 "status": "Hoàn thành" if completed else f"{row['repetition_level']}/8",
@@ -474,6 +465,7 @@ def create_app(test_config=None):
         today = get_db().execute("SELECT daily_practice FROM review_state WHERE singleton = 1").fetchone()
         return jsonify(
             collocations_stats=_compute_stats(get_db(), now, now_text, "collocations"),
+            synonymous_collocations_stats=_compute_stats(get_db(), now, now_text, "synonymous_collocations"),
             vocabulary_stats=_compute_stats(get_db(), now, now_text, "vocabulary"),
             today_practice=today["daily_practice"] if today else 0,
         )
@@ -487,15 +479,15 @@ def create_app(test_config=None):
         try:
             data = payload()
             english = unicodedata.normalize("NFC", required_text(data.get("english"), "Từ tiếng Anh")).lower()
-            vietnamese = required_text(data.get("vietnamese"), "Nghĩa tiếng Việt")
-            repetition_level = 0
+            meaning_field = "synonym" if table == "synonymous_collocations" else "vietnamese"
+            meaning = unicodedata.normalize("NFC", required_text(data.get(meaning_field), "Cụm từ đồng nghĩa" if meaning_field == "synonym" else "Nghĩa tiếng Việt")).lower()
             next_review_at = local_now().isoformat()
             with transaction() as db:
-                reject_duplicate_english(table, english)
+                reject_duplicate_english(table, english, meaning if meaning_field == "synonym" else None)
                 cursor = db.execute(
-                    f"INSERT INTO {table} (english, vietnamese, repetition_level, next_review_at) "
-                    "VALUES (?, ?, ?, ?) RETURNING id",
-                    (english, vietnamese.lower(), repetition_level, next_review_at),
+                    f"INSERT INTO {table} (english, {meaning_field}, repetition_level, next_review_at) "
+                    "VALUES (?, ?, 0, ?) RETURNING id",
+                    (english, meaning, next_review_at),
                 ).fetchone()
         except ValueError as error:
             return jsonify(error=str(error)), 400
@@ -594,12 +586,12 @@ def create_app(test_config=None):
         try:
             data = payload()
             english = unicodedata.normalize("NFC", required_text(data.get("english"), "Từ tiếng Anh")).lower()
-            vietnamese = required_text(data.get("vietnamese"), "Nghĩa tiếng Việt")
-            # Kiểm tra trùng lặp trong cùng bảng (trừ chính từ hiện tại)
-            reject_duplicate_english(table, english, word_id)
+            meaning_field = "synonym" if table == "synonymous_collocations" else "vietnamese"
+            meaning = unicodedata.normalize("NFC", required_text(data.get(meaning_field), "Cụm từ đồng nghĩa" if meaning_field == "synonym" else "Nghĩa tiếng Việt")).lower()
+            reject_duplicate_english(table, english, meaning if meaning_field == "synonym" else None, word_id)
             db.execute(
-                f"UPDATE {table} SET english = ?, vietnamese = ? WHERE id = ?",
-                (english, vietnamese.lower(), word_id),
+                f"UPDATE {table} SET english = ?, {meaning_field} = ? WHERE id = ?",
+                (english, meaning, word_id),
             )
         except ValueError as error:
             return jsonify(error=str(error)), 400
@@ -637,20 +629,25 @@ def create_app(test_config=None):
         if mode is None:
             return jsonify(error="Chế độ quiz không hợp lệ."), 400
         with transaction() as db:
-            words = db.execute(f"SELECT id, english, vietnamese FROM {table} ORDER BY id").fetchall()
+            meaning_field = "synonym" if table == "synonymous_collocations" else "vietnamese"
+            words = db.execute(f"SELECT id, english, {meaning_field} FROM {table} ORDER BY id").fetchall()
             if len(words) < 8:
-                return jsonify(error=f"Cần ít nhất 8 từ trong bảng {table} để bắt đầu quiz."), 400
+                return jsonify(error=f"Cần ít nhất 8 mục trong bảng {table} để bắt đầu quiz."), 400
             round_id, due_words = begin_round(db, "quiz", mode, request.args.get("hard") == "1", table)
             questions = []
             for word in due_words:
-                choices = select_distractors_with_interests(word["id"], words, 7) + [word]
+                distractors = db.execute(
+                    f"SELECT id, english, {meaning_field} FROM {table} WHERE id != ? ORDER BY RANDOM() LIMIT 7",
+                    (word["id"],),
+                ).fetchall()
+                choices = list(distractors) + [word]
                 random.shuffle(choices)
                 db.execute("UPDATE review_round_words SET choice_ids = ? WHERE word_id = ?",
                            (json.dumps([choice["id"] for choice in choices]), word["id"]))
                 questions.append({
-                    "word_id": word["id"], "prompt": word["english"] if mode == "av" else word["vietnamese"],
+                    "word_id": word["id"], "prompt": word["english"] if mode == "av" else word[meaning_field],
                     "repetition_level_after_correct": min(word["repetition_level"] + 2, 8),
-                    "choices": [{"id": choice["id"], "text": choice["vietnamese" if mode == "av" else "english"]} for choice in choices],
+                    "choices": [{"id": choice["id"], "text": choice[meaning_field if mode == "av" else "english"]} for choice in choices],
                 })
         return jsonify(round_id=round_id, questions=questions)
 
@@ -677,14 +674,16 @@ def create_app(test_config=None):
                 if set(choice_ids) != set(json.loads(item["choice_ids"])):
                     raise Conflict("Các lựa chọn không thuộc câu hỏi.")
                 placeholders = ",".join("?" for _ in choice_ids)
-                query = f"SELECT id, vietnamese FROM {table} WHERE id IN ({placeholders})"
+                meaning_field = "synonym" if table == "synonymous_collocations" else "vietnamese"
+                query = f"SELECT id, {meaning_field} FROM {table} WHERE id IN ({placeholders})"
                 rows = db.execute(query, choice_ids).fetchall()
                 if len(rows) != 8:
-                    raise Conflict("Một hoặc nhiều từ trong câu hỏi không còn tồn tại.")
-                correct_ids = [row["id"] for row in rows if normalize_meaning(row["vietnamese"]) == normalize_meaning(word["vietnamese"])]
+                    raise Conflict("Một hoặc nhiều mục trong câu hỏi không còn tồn tại.")
+                correct_ids = ([word_id] if table == "synonymous_collocations" else
+                               [row["id"] for row in rows if normalize_meaning(row[meaning_field]) == normalize_meaning(word[meaning_field])])
                 correct = not timeout and selected_id in correct_ids
                 result = save_result(db, word, "timeout" if timeout else "correct" if correct else "wrong", elapsed, table)
-                result = receipt(db, word_id, data, dict(correct=correct, correct_option_ids=correct_ids, **result))
+                result = receipt(db, word_id, data, dict(correct=correct, correct_option_ids=correct_ids, response_time_ms=elapsed, **result))
             return jsonify(**result)
         except ValueError as error:
             return jsonify(error=str(error)), 400
@@ -700,8 +699,9 @@ def create_app(test_config=None):
             return jsonify(error="Chế độ ôn thẻ không hợp lệ."), 400
         with transaction() as db:
             round_id, rows = begin_round(db, "flashcard", mode, request.args.get("hard") == "1", table)
-            cards = [{"word_id": row["id"], "front": row["vietnamese" if mode == "va" else "english"],
-                      "back": row["english" if mode == "va" else "vietnamese"],
+            meaning_field = "synonym" if table == "synonymous_collocations" else "vietnamese"
+            cards = [{"word_id": row["id"], "front": row[meaning_field if mode == "va" else "english"],
+                      "back": row["english" if mode == "va" else meaning_field],
                       "repetition_level": row["repetition_level"],
                       "first_review": row["practice_count"] == 0 and row["repetition_level"] == 0} for row in rows]
         return jsonify(round_id=round_id, cards=cards)

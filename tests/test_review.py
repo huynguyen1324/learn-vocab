@@ -211,25 +211,22 @@ class ReviewTests(unittest.TestCase):
                                    json={'round_id': data['round_id'], 'response_time_ms': 1000})
         self.assertEqual(allowed.status_code, 200)
 
-    def test_quiz_completion_needs_correct_answer_for_same_shown_word_and_within_three_seconds(self):
-        target = self.seed(8, 0)
-        data = self.client.post('/api/quiz/start?table=collocations').json
-        question = next(q for q in data['questions'] if q['word_id'] == target)
-        self.show(target, data['round_id'])
-        other = target + 1
-        response = self.client.post(f'/api/words/{other}/complete?table=collocations',
-                                    json={'round_id': data['round_id'], 'response_time_ms': 0})
-        self.assertEqual(response.status_code, 409)
-        answered = self.client.post('/api/quiz/answer', json=dict(
-            round_id=data['round_id'], word_id=target, selected_id=target,
-            response_time_ms=2000, choice_ids=[choice['id'] for choice in question['choices']]))
-        self.assertEqual(answered.status_code, 200)
-        too_slow = self.client.post(f'/api/words/{target}/complete?table=collocations',
-                                    json={'round_id': data['round_id'], 'response_time_ms': 1001})
-        self.assertEqual(too_slow.status_code, 400)
-        allowed = self.client.post(f'/api/words/{target}/complete?table=collocations',
-                                   json={'round_id': data['round_id'], 'response_time_ms': 1000})
-        self.assertEqual(allowed.status_code, 200)
+    def test_discard_round_clears_session_without_changing_word_schedule(self):
+        word = self.seed()
+        data = self.start()
+        original = self.client.get('/api/words?table=collocations').json['words'][0]['next_review_at']
+        self.show(word, data['round_id'])
+        discarded = self.client.post('/api/review/discard', json={'round_id': data['round_id']})
+        self.assertEqual(discarded.status_code, 200)
+        self.assertTrue(discarded.json['discarded'])
+        with closing(sqlite3.connect(self.path)) as db:
+            self.assertEqual(db.execute('SELECT COUNT(*) FROM review_round_words').fetchone()[0], 0)
+            self.assertEqual(db.execute('SELECT COUNT(*) FROM review_receipts').fetchone()[0], 0)
+        current = self.client.get('/api/words?table=collocations').json['words'][0]
+        self.assertEqual(current['next_review_at'], original)
+        self.assertEqual(self.client.post('/api/flashcard/answer', json=dict(
+            word_id=word, round_id=data['round_id'], result='correct', response_time_ms=1000
+        )).status_code, 409)
 
     def test_quiz_normalized_synonyms_both_modes_count_and_completion(self):
         import unicodedata
@@ -254,9 +251,10 @@ class ReviewTests(unittest.TestCase):
             self.assertEqual(response.json['repetition_level'], 8)
             record = next(w for w in self.client.get('/api/words?table=collocations').json['words'] if w['id'] == word)
             self.assertEqual(record['practice_count'], 1)
-            for _ in range(2):
-                self.assertEqual(self.client.post(f'/api/words/{word}/complete?table=collocations',
-                    json={'round_id':data['round_id']}).status_code, 200)
+            self.assertEqual(self.client.post(f'/api/words/{word}/complete?table=collocations',
+                json={'round_id':data['round_id'], 'response_time_ms': 0}).status_code, 200)
+            self.assertEqual(self.client.post(f'/api/words/{word}/complete?table=collocations',
+                json={'round_id':data['round_id'], 'response_time_ms': 0}).status_code, 200)
 
     def test_invalid_times_and_zero_floor(self):
         word=self.seed();rid=self.start()['round_id'];self.show(word,rid)
