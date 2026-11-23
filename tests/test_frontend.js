@@ -56,7 +56,7 @@ function setup() {
     assert.ok(elements.has(`#${id}`), `Missing HTML element: ${id}`);
     return elements.get(`#${id}`);
   };
-  el("word-form").elements = { english: new Element(), vietnamese: new Element() };
+  el("word-form").elements = { english: new Element(), vietnamese: new Element(), gloss: new Element() };
   const headers = [...html.matchAll(/<th[^>]*data-sort="([^"]+)"/g)].map(match => { const header = new Element(); header.dataset.sort = match[1]; return header; });
   const requests = [];
   const discards = [];
@@ -101,7 +101,7 @@ function setup() {
     now += milliseconds;
     for (const callback of [...timers.values()]) callback();
   };
-  return { el, run, requests, discards, timers, tick, headers };
+  return { el, run, requests, discards, timers, tick, headers, html };
 }
 
 const flush = async () => { for (let i = 0; i < 10; i++) await Promise.resolve(); };
@@ -236,6 +236,23 @@ for (const fail of [false, true]) {
     assert.equal(h.run("flashcards.answered"), false);
   });
 }
+
+test("synonym flashcard reveals Vietnamese gloss together with synonym", async () => {
+  const h = setup();
+  h.el("flashcard-table").value = "synonymous_collocations";
+  const pending = h.run('startFlashcards("av")');
+  h.requests.at(-1).respond({ round_id: "round-1", cards: [{ word_id: 12, front: "take a bus", back: "catch a bus", vietnamese: "bắt xe bus", repetition_level: 2 }] });
+  await flush();
+  assert.equal(h.el("flashcard-gloss").hidden, true);
+  assert.equal(h.requests.at(-1).url, "/api/words/12/practice?table=synonymous_collocations");
+  h.requests.at(-1).respond({ practice_count: 3 });
+  await pending;
+  h.el("flashcard").fire("click");
+  assert.equal(h.el("flashcard-back").hidden, false);
+  assert.equal(h.el("flashcard-back").textContent, "catch a bus");
+  assert.equal(h.el("flashcard-gloss").hidden, false);
+  assert.equal(h.el("flashcard-gloss").textContent, "bắt xe bus");
+});
 
 test("first-review flashcard shows back and enables ratings without flipping or timeout", async () => {
   const h = setup();
@@ -523,6 +540,18 @@ test("phrase list has filtered numbering, mastery, practice count, warning thres
   assert.match(html, /Danh sách cụm từ/);
   assert.match(html, /Danh sách cụm từ đồng nghĩa/);
   assert.match(html, /Mức thông thạo/);
+});
+
+test("synonym list renders Vietnamese gloss and eight-column actions layout", async () => {
+  const h = setup();
+  h.el("synonym-list-tab").fire("click");
+  assert.match(h.requests.at(-1).url, /table=synonymous_collocations/);
+  h.requests.at(-1).respond({ words: [{ id: 9, english: "take a bus", synonym: "catch a bus", vietnamese: "bắt xe", status: "0/8", repetition_level: 0, practice_count: 0 }] });
+  await flush();
+  const row = h.el("synonym-word-list").children[0];
+  assert.equal(row.children.length, 8);
+  assert.deepEqual(row.children.slice(1, 6).map((cell) => cell.textContent), ["take a bus", "catch a bus", "bắt xe", "0/8", 0]);
+  assert.deepEqual([...html.matchAll(/<col style="width:(\d+)%">/g)].slice(0, 8).map((match) => Number(match[1])), [5, 15, 15, 15, 10, 10, 10, 20]);
 });
 
 test("vocabulary list CRUD targets vocabulary and review selection/stats are wired", async () => {

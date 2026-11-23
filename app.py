@@ -59,6 +59,7 @@ CREATE TABLE IF NOT EXISTS synonymous_collocations (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     english TEXT NOT NULL,
     synonym TEXT NOT NULL,
+    vietnamese TEXT NOT NULL DEFAULT '',
     repetition_level INTEGER NOT NULL DEFAULT 0 CHECK (repetition_level BETWEEN 0 AND 8),
     practice_count INTEGER NOT NULL DEFAULT 0 CHECK (practice_count >= 0),
     next_review_at TEXT,
@@ -150,6 +151,9 @@ def create_app(test_config=None):
     connection = connect_database(app.config["DATABASE"])
     try:
         connection.executescript(SQLITE_SCHEMA)
+        synonym_columns = {row[1] for row in connection.execute("PRAGMA table_info(synonymous_collocations)")}
+        if "vietnamese" not in synonym_columns:
+            connection.execute("ALTER TABLE synonymous_collocations ADD COLUMN vietnamese TEXT NOT NULL DEFAULT ''")
         connection.execute("CREATE UNIQUE INDEX IF NOT EXISTS vocabulary_english_unique ON vocabulary (lower(english))")
         columns = {row[1] for row in connection.execute("PRAGMA table_info(review_state)")}
         if "practice_day" not in columns and "batch_day" in columns:
@@ -393,7 +397,7 @@ def create_app(test_config=None):
         # shortcut: filters scan the full personal vocabulary; use indexed search if datasets grow large.
         meaning_field = "synonym" if table == "synonymous_collocations" else "vietnamese"
         rows = get_db().execute(
-            f"SELECT id, english, {meaning_field}, repetition_level, practice_count, next_review_at "
+            f"SELECT id, english, {meaning_field}, {'vietnamese' if table == 'synonymous_collocations' else meaning_field}, repetition_level, practice_count, next_review_at "
             f"FROM {table} ORDER BY {order_clause}"
         ).fetchall()
         result = []
@@ -401,8 +405,8 @@ def create_app(test_config=None):
             if search and search not in row["english"].casefold() and search not in row[meaning_field].casefold():
                 continue
             completed = row["repetition_level"] == 8 and row["next_review_at"] is None
-            due = row["next_review_at"] is not None and (row["next_review_at"] <= now
-                    or (row["repetition_level"] == 0 and row["practice_count"] == 0))
+            due = ((row["repetition_level"] == 0 and row["practice_count"] == 0)
+                   or (row["next_review_at"] is not None and row["next_review_at"] <= now))
             hard = row["practice_count"] - row["repetition_level"] >= 3
             if status_filter == "due" and not due:
                 continue
@@ -416,6 +420,7 @@ def create_app(test_config=None):
                 "id": row["id"],
                 "english": row["english"],
                 meaning_field: row[meaning_field],
+                **({"vietnamese": row["vietnamese"]} if table == "synonymous_collocations" else {}),
                 "repetition_level": row["repetition_level"],
                 "practice_count": row["practice_count"],
                 "status": "Hoàn thành" if completed else f"{row['repetition_level']}/8",
@@ -433,10 +438,8 @@ def create_app(test_config=None):
         due = upcoming = done = hard = levels = practices = 0
         for row in rows:
             completed = row["repetition_level"] == 8 and row["next_review_at"] is None
-            is_due = row["next_review_at"] is not None and (
-                row["next_review_at"] <= now_text
-                or (row["repetition_level"] == 0 and row["practice_count"] == 0)
-            )
+            is_due = ((row["repetition_level"] == 0 and row["practice_count"] == 0)
+                      or (row["next_review_at"] is not None and row["next_review_at"] <= now_text))
             if completed:
                 done += 1
             elif is_due:
@@ -481,13 +484,14 @@ def create_app(test_config=None):
             english = unicodedata.normalize("NFC", required_text(data.get("english"), "Từ tiếng Anh")).lower()
             meaning_field = "synonym" if table == "synonymous_collocations" else "vietnamese"
             meaning = unicodedata.normalize("NFC", required_text(data.get(meaning_field), "Cụm từ đồng nghĩa" if meaning_field == "synonym" else "Nghĩa tiếng Việt")).lower()
+            vietnamese = unicodedata.normalize("NFC", required_text(data.get("vietnamese"), "Nghĩa tiếng Việt")) if meaning_field == "synonym" else meaning
             next_review_at = local_now().isoformat()
             with transaction() as db:
                 reject_duplicate_english(table, english, meaning if meaning_field == "synonym" else None)
                 cursor = db.execute(
-                    f"INSERT INTO {table} (english, {meaning_field}, repetition_level, next_review_at) "
-                    "VALUES (?, ?, 0, ?) RETURNING id",
-                    (english, meaning, next_review_at),
+                    f"INSERT INTO {table} (english, {meaning_field}{', vietnamese' if meaning_field == 'synonym' else ''}, repetition_level, next_review_at) "
+                    f"VALUES (?, ?{', ?' if meaning_field == 'synonym' else ''}, 0, ?) RETURNING id",
+                    (english, meaning, vietnamese, next_review_at) if meaning_field == "synonym" else (english, meaning, next_review_at),
                 ).fetchone()
         except ValueError as error:
             return jsonify(error=str(error)), 400
@@ -588,10 +592,11 @@ def create_app(test_config=None):
             english = unicodedata.normalize("NFC", required_text(data.get("english"), "Từ tiếng Anh")).lower()
             meaning_field = "synonym" if table == "synonymous_collocations" else "vietnamese"
             meaning = unicodedata.normalize("NFC", required_text(data.get(meaning_field), "Cụm từ đồng nghĩa" if meaning_field == "synonym" else "Nghĩa tiếng Việt")).lower()
+            vietnamese = unicodedata.normalize("NFC", required_text(data.get("vietnamese"), "Nghĩa tiếng Việt")) if meaning_field == "synonym" else meaning
             reject_duplicate_english(table, english, meaning if meaning_field == "synonym" else None, word_id)
             db.execute(
-                f"UPDATE {table} SET english = ?, {meaning_field} = ? WHERE id = ?",
-                (english, meaning, word_id),
+                f"UPDATE {table} SET english = ?, {meaning_field} = ?{', vietnamese = ?' if meaning_field == 'synonym' else ''} WHERE id = ?",
+                (english, meaning, vietnamese, word_id) if meaning_field == "synonym" else (english, meaning, word_id),
             )
         except ValueError as error:
             return jsonify(error=str(error)), 400
@@ -702,6 +707,7 @@ def create_app(test_config=None):
             meaning_field = "synonym" if table == "synonymous_collocations" else "vietnamese"
             cards = [{"word_id": row["id"], "front": row[meaning_field if mode == "va" else "english"],
                       "back": row["english" if mode == "va" else meaning_field],
+                      **({"vietnamese": row["vietnamese"]} if table == "synonymous_collocations" else {}),
                       "repetition_level": row["repetition_level"],
                       "first_review": row["practice_count"] == 0 and row["repetition_level"] == 0} for row in rows]
         return jsonify(round_id=round_id, cards=cards)

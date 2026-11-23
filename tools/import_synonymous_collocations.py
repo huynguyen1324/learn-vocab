@@ -29,7 +29,10 @@ def parse_synonymous_collocations(text):
         if len(fields) < 2:
             raise ValueError(f"Entry tại dòng {entry_line}: thiếu english hoặc synonym.")
         english, synonym = fields[0][0].lower(), fields[1][0].lower()
-        entries.append((english, synonym))
+        vietnamese = fields[2][0] if len(fields) > 2 else ""
+        if not vietnamese.strip():
+            raise ValueError(f"Entry tại dòng {entry_line}: thiếu nghĩa tiếng Việt.")
+        entries.append((english, synonym, vietnamese.lower()))
     return entries
 
 
@@ -42,14 +45,18 @@ def import_synonymous_collocations(source=SOURCE, database=DATABASE):
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             english TEXT NOT NULL,
             synonym TEXT NOT NULL,
+            vietnamese TEXT NOT NULL DEFAULT '',
             repetition_level INTEGER NOT NULL DEFAULT 0 CHECK (repetition_level BETWEEN 0 AND 8),
             practice_count INTEGER NOT NULL DEFAULT 0 CHECK (practice_count >= 0),
             next_review_at TEXT,
             UNIQUE (english COLLATE NOCASE, synonym COLLATE NOCASE)
         )""")
+        columns = {row[1] for row in connection.execute("PRAGMA table_info(synonymous_collocations)")}
+        if "vietnamese" not in columns:
+            connection.execute("ALTER TABLE synonymous_collocations ADD COLUMN vietnamese TEXT NOT NULL DEFAULT ''")
         before = connection.total_changes
         connection.executemany(
-            "INSERT OR IGNORE INTO synonymous_collocations (english, synonym, repetition_level, practice_count) VALUES (?, ?, 0, 0)",
+            "INSERT OR IGNORE INTO synonymous_collocations (english, synonym, vietnamese, repetition_level, practice_count) VALUES (?, ?, ?, 0, 0)",
             entries,
         )
         imported = connection.total_changes - before

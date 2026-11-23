@@ -144,6 +144,8 @@ Work late
 
 Work overtime
 
+làm thêm giờ
+
 21
 
 Can't stay for the whole meeting

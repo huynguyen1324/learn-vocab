@@ -8,24 +8,26 @@ from tools.import_synonymous_collocations import import_synonymous_collocations,
 
 
 class SynonymousCollocationTests(unittest.TestCase):
-    def test_parser_skips_optional_gloss_and_lowercases_pairs(self):
-        self.assertEqual(parse_synonymous_collocations("1\n\nTAKE A BUS\n\nCatch a Bus\n\nbắt xe\n\n2\n\nWork Late\n\nWork Overtime\n"),
-                         [("take a bus", "catch a bus"), ("work late", "work overtime")])
+    def test_parser_reads_all_three_fields_and_lowercases_them(self):
+        self.assertEqual(parse_synonymous_collocations("1\n\nTAKE A BUS\n\nCatch a Bus\n\nBẮT XE BUS\n"),
+                         [("take a bus", "catch a bus", "bắt xe bus")])
 
-    def test_parser_reports_missing_pair(self):
+    def test_parser_reports_missing_field(self):
         with self.assertRaisesRegex(ValueError, "dòng 1"):
-            parse_synonymous_collocations("1\n\nonly one")
+            parse_synonymous_collocations("1\n\nonly one\n")
+        with self.assertRaisesRegex(ValueError, "nghĩa tiếng Việt"):
+            parse_synonymous_collocations("1\n\nphrase\n\nsynonym\n")
 
     def test_import_is_idempotent(self):
         with tempfile.TemporaryDirectory() as tmp:
             source = Path(tmp) / "source.md"
             database = Path(tmp) / "db.sqlite3"
-            source.write_text("1\n\nTake a bus\n\nCatch a bus\n\ngloss\n", encoding="utf-8")
+            source.write_text("1\n\nTake a bus\n\nCatch a bus\n\nbắt xe bus\n", encoding="utf-8")
             self.assertEqual(import_synonymous_collocations(source, database), (1, 0))
             self.assertEqual(import_synonymous_collocations(source, database), (0, 1))
             db = sqlite3.connect(database)
             try:
-                self.assertEqual(db.execute("SELECT english, synonym FROM synonymous_collocations").fetchall(), [("take a bus", "catch a bus")])
+                self.assertEqual(db.execute("SELECT english, synonym, vietnamese FROM synonymous_collocations").fetchall(), [("take a bus", "catch a bus", "bắt xe bus")])
             finally:
                 db.close()
 
@@ -33,11 +35,11 @@ class SynonymousCollocationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             app = create_app({"TESTING": True, "DATABASE": str(Path(tmp) / "db.sqlite3")})
             client = app.test_client()
-            created = client.post("/api/words?table=synonymous_collocations", json={"english": "Take a bus", "synonym": "Catch a bus"})
+            created = client.post("/api/words?table=synonymous_collocations", json={"english": "Take a bus", "synonym": "Catch a bus", "vietnamese": "bắt xe bus"})
             self.assertEqual(created.status_code, 201)
             word_id = created.json["id"]
             self.assertEqual(client.get("/api/words?table=synonymous_collocations").json["words"][0]["synonym"], "catch a bus")
-            duplicate = client.post("/api/words?table=synonymous_collocations", json={"english": "TAKE A BUS", "synonym": "CATCH A BUS"})
+            duplicate = client.post("/api/words?table=synonymous_collocations", json={"english": "TAKE A BUS", "synonym": "CATCH A BUS", "vietnamese": "bắt xe bus"})
             self.assertEqual(duplicate.status_code, 409)
             self.assertEqual(client.get("/api/stats").json["synonymous_collocations_stats"]["total"], 1)
             round_id = client.post("/api/flashcard/start?table=synonymous_collocations").json["round_id"]
@@ -50,7 +52,7 @@ class SynonymousCollocationTests(unittest.TestCase):
             app = create_app({"TESTING": True, "DATABASE": str(Path(tmp) / "db.sqlite3")})
             client = app.test_client()
             db = sqlite3.connect(app.config["DATABASE"])
-            db.executemany("INSERT INTO synonymous_collocations (english, synonym, next_review_at) VALUES (?, ?, datetime('now','-1 day'))", [(f"phrase {i}", f"equivalent {i}") for i in range(8)])
+            db.executemany("INSERT INTO synonymous_collocations (english, synonym, vietnamese, next_review_at) VALUES (?, ?, ?, datetime('now','-1 day'))", [(f"phrase {i}", f"equivalent {i}", f"meaning {i}") for i in range(8)])
             db.commit()
             db.close()
             quiz = client.post("/api/quiz/start?table=synonymous_collocations&mode=av")

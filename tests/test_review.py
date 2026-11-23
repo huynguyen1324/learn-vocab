@@ -264,6 +264,16 @@ class ReviewTests(unittest.TestCase):
         self.assertEqual(response.json['repetition_level'],0)
         self.assertEqual(response.json['next_review_at'],(self.now+timedelta(hours=1)).isoformat())
 
+    def test_stats_classify_new_zero_level_even_with_future_date_as_due(self):
+        word = self.seed()
+        with closing(sqlite3.connect(self.path)) as db, db:
+            db.execute('UPDATE collocations SET next_review_at = ? WHERE id = ?',
+                       ((self.now + timedelta(days=2)).isoformat(), word))
+        stats = self.client.get('/api/stats').json['collocations_stats']
+        self.assertEqual((stats['total'], stats['due'], stats['upcoming'], stats['completed']), (1, 1, 0, 0))
+        listed = self.client.get('/api/words?table=collocations&status=due').json['words']
+        self.assertEqual([row['id'] for row in listed], [word])
+
     def test_stats_and_daily_practice_reset(self):
         self.seed(2, 0)
         self.seed(1, 8)

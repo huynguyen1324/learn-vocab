@@ -57,7 +57,7 @@ function renderWords(items) {
   if (!items.length) {
     const row = document.createElement("tr");
     const cell = document.createElement("td");
-    cell.colSpan = 7;
+    cell.colSpan = activeListTable === "synonymous_collocations" ? 8 : 7;
     cell.className = "empty";
     cell.textContent = activeListTable === "vocabulary" ? "Không có từ vựng nào phù hợp." : activeListTable === "synonymous_collocations" ? "Không có cụm từ đồng nghĩa nào phù hợp." : "Không có cụm từ nào phù hợp.";
     row.append(cell);
@@ -71,6 +71,7 @@ function renderWords(items) {
     addCell(row, index + 1);
     addCell(row, word.english);
     addCell(row, word[activeListTable === "synonymous_collocations" ? "synonym" : "vietnamese"]);
+    if (activeListTable === "synonymous_collocations") addCell(row, word.vietnamese);
     addCell(row, word.status);
     addCell(row, word.practice_count);
     addCell(row, word.next_review_at ? formatDate(word.next_review_at) : "—");
@@ -134,6 +135,8 @@ function openWordDialog(word = null) {
   document.querySelector("#dialog-type-label").textContent = isSynonym ? "Cụm tiếng Anh và cụm đồng nghĩa" : `${noun[0].toUpperCase()}${noun.slice(1)} tiếng Anh`;
   wordForm.elements.english.value = word ? word.english : "";
   wordForm.elements.vietnamese.value = word ? (isSynonym ? word.synonym : word.vietnamese) : "";
+  wordForm.elements.gloss.value = word ? (word.vietnamese || "") : "";
+  document.querySelector("#gloss-label").hidden = !isSynonym;
   document.querySelector("#meaning-label").textContent = isSynonym ? "Cụm từ đồng nghĩa" : "Nghĩa tiếng Việt";
   wordDialog.showModal();
   wordForm.elements.english.focus();
@@ -150,6 +153,7 @@ wordForm.addEventListener("submit", async (event) => {
   const data = {
     english: wordForm.elements.english.value,
     [activeListTable === "synonymous_collocations" ? "synonym" : "vietnamese"]: wordForm.elements.vietnamese.value,
+    ...(activeListTable === "synonymous_collocations" ? { vietnamese: wordForm.elements.gloss.value } : {}),
   };
   try {
     const table = activeListTable;
@@ -520,6 +524,7 @@ function resetFlashcards() {
   flashcards.retryTimeout = false;
   document.querySelector("#flashcard-panel").hidden = true;
   document.querySelector("#flashcard-back").hidden = true;
+  document.querySelector("#flashcard-gloss").hidden = true;
   flashcardButton.classList.remove("flipped");
 }
 
@@ -589,6 +594,8 @@ function flipFlashcard(automatic = false) {
   stopFlashcardTimer();
   flashcardButton.classList.add("flipped");
   document.querySelector("#flashcard-back").hidden = false;
+  const gloss = document.querySelector("#flashcard-gloss");
+  gloss.hidden = !flashcards.cards[flashcards.index].vietnamese;
   document.querySelector("#flashcard-correct").disabled = automatic;
   document.querySelector("#flashcard-wrong").disabled = automatic;
   document.querySelector("#flashcard-relative").disabled = automatic;
@@ -613,6 +620,7 @@ async function renderFlashcard() {
     document.querySelector("#flashcard-stage").textContent = "";
     document.querySelector("#flashcard-front").textContent = "";
     document.querySelector("#flashcard-back").hidden = true;
+    document.querySelector("#flashcard-gloss").hidden = true;
     flashcardButton.disabled = true;
     correct.disabled = true;
     wrong.disabled = true;
@@ -628,6 +636,9 @@ async function renderFlashcard() {
   document.querySelector("#flashcard-front").textContent = card.front;
   document.querySelector("#flashcard-back").textContent = card.back;
   document.querySelector("#flashcard-back").hidden = !card.first_review;
+  const gloss = document.querySelector("#flashcard-gloss");
+  gloss.textContent = card.vietnamese || "";
+  gloss.hidden = !card.first_review || !card.vietnamese;
   document.querySelector("#flashcard-progress-fill").style.width = "0%";
   document.querySelector("#flashcard-progress").setAttribute("aria-valuenow", "0");
   feedback.textContent = "";

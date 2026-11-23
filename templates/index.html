@@ -85,8 +85,12 @@
           </select>
         </label>
       </div>
-      <div class="table-wrap"><table>
-        <thead><tr><th>STT</th><th data-sort="english" class="sortable">English</th><th>Synonym</th><th data-sort="repetition_level" class="sortable">Mức thông thạo</th><th data-sort="practice_count" class="sortable">Số lần ôn</th><th data-sort="next_review_at" class="sortable">Thời điểm ôn tiếp theo</th><th><span class="sr-only">Thao tác</span></th></tr></thead>
+      <div class="table-wrap"><table class="synonym-table">
+        <colgroup>
+          <col style="width:5%"><col style="width:15%"><col style="width:15%"><col style="width:15%">
+          <col style="width:10%"><col style="width:10%"><col style="width:10%"><col style="width:20%">
+        </colgroup>
+        <thead><tr><th>STT</th><th data-sort="english" class="sortable">English</th><th>Synonym</th><th>Nghĩa tiếng Việt</th><th data-sort="repetition_level" class="sortable">Mức thông thạo</th><th data-sort="practice_count" class="sortable">Số lần ôn</th><th data-sort="next_review_at" class="sortable">Thời điểm ôn tiếp theo</th><th><span class="sr-only">Thao tác</span></th></tr></thead>
         <tbody id="synonym-word-list"></tbody>
       </table></div>
     </section>
@@ -208,6 +212,7 @@
         <button id="flashcard" class="flashcard" type="button" aria-label="Lật thẻ">
           <span id="flashcard-front"></span>
           <span id="flashcard-back" hidden></span>
+          <span id="flashcard-gloss" hidden></span>
         </button>
         <p id="flashcard-feedback" role="status" aria-live="polite"></p>
         <div class="quiz-actions">
@@ -250,6 +255,9 @@
       </label>
       <label><span id="meaning-label">Nghĩa tiếng Việt</span>
         <input name="vietnamese" maxlength="500" required autocomplete="off">
+      </label>
+      <label id="gloss-label" hidden>Nghĩa tiếng Việt
+        <input name="gloss" maxlength="500" autocomplete="off">
       </label>
       <p id="form-error" class="error" role="alert"></p>
       <div class="dialog-actions">
