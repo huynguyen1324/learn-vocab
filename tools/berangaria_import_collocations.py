@@ -22,9 +22,11 @@ def parse_collocations(content):
             for english, vietnamese in zip(lines[::2], lines[1::2])]
 
 
-def import_collocations(input_path=TOOLS / "output_collocations.txt", database_path=ROOT / "instance" / "vocabulary.sqlite3"):
+def import_collocations(input_path=TOOLS / "berangaria_output_collocations.txt", database_path=ROOT / "instance" / "vocabulary.sqlite3"):
     entries = parse_collocations(Path(input_path).read_text(encoding="utf-8-sig"))
     create_app({"TESTING": True, "DATABASE": database_path})
+    if not Path(database_path).exists():
+        return (0, len(entries))
     db = connect_database(database_path)
     try:
         existing = {unicodedata.normalize("NFC", row["english"]).casefold()
@@ -51,7 +53,7 @@ def import_collocations(input_path=TOOLS / "output_collocations.txt", database_p
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--input", type=Path, default=TOOLS / "output_collocations.txt")
+    parser.add_argument("--input", type=Path, default=TOOLS / "berangaria_output_collocations.txt")
     parser.add_argument("--database", type=Path, default=ROOT / "instance" / "vocabulary.sqlite3")
     args = parser.parse_args(argv)
     try:

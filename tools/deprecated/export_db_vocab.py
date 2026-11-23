@@ -5,8 +5,8 @@ from contextlib import closing
 from datetime import datetime
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1]
-TOOLS = Path(__file__).resolve().parent
+ROOT = Path(__file__).resolve().parents[2]
+TOOLS = ROOT / "tools"
 
 
 def export_vocabulary(database=ROOT / "instance" / "vocabulary.sqlite3", output=TOOLS / "input_vocab.txt"):

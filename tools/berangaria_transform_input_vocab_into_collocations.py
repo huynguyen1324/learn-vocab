@@ -16,7 +16,7 @@ TOOLS = Path(__file__).resolve().parent
 if __package__ in {None, ""}:
     sys.path.insert(0, str(ROOT))
 
-from tools.import_collocations import parse_collocations
+from tools.berangaria_import_collocations import parse_collocations
 
 
 @contextmanager
@@ -36,7 +36,7 @@ def waiting_for_ai(started):
         reporter.join()
 
 
-def generate_collocations(input_path=TOOLS / "input_vocab.txt", output_path=TOOLS / "output_collocations.txt", config_path=ROOT / "config.json", user_description_path=ROOT / "USER_DESCRIPTION.md"):
+def generate_collocations(input_path=TOOLS / "berangaria_input_vocab.txt", output_path=TOOLS / "berangaria_output_collocations.txt", config_path=ROOT / "config.json", user_description_path=ROOT / "USER_DESCRIPTION.md"):
     entries = parse_collocations(Path(input_path).read_text(encoding="utf-8-sig"))
     config = json.loads(Path(config_path).read_text(encoding="utf-8-sig"))
     if not isinstance(config, dict):
@@ -131,8 +131,8 @@ def generate_collocations(input_path=TOOLS / "input_vocab.txt", output_path=TOOL
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--input", type=Path, default=TOOLS / "input_vocab.txt")
-    parser.add_argument("--output", type=Path, default=TOOLS / "output_collocations.txt")
+    parser.add_argument("--input", type=Path, default=TOOLS / "berangaria_input_vocab.txt")
+    parser.add_argument("--output", type=Path, default=TOOLS / "berangaria_output_collocations.txt")
     parser.add_argument("--config", type=Path, default=ROOT / "config.json")
     args = parser.parse_args(argv)
     try:
