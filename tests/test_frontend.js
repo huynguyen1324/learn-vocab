@@ -106,10 +106,10 @@ function setup() {
 
 const flush = async () => { for (let i = 0; i < 10; i++) await Promise.resolve(); };
 const cards = [
-  { word_id: 1, front: "one", back: "một", repetition_level: 2 },
-  { word_id: 2, front: "two", back: "hai", repetition_level: 3 },
+  { word_id: 1, front: "one", back: "một", repetition_level: 2, is_review: true },
+  { word_id: 2, front: "two", back: "hai", repetition_level: 3, is_review: true },
 ];
-const firstReviewCard = { word_id: 3, front: "three", back: "ba", repetition_level: 0, first_review: true };
+const firstReviewCard = { word_id: 3, front: "three", back: "ba", repetition_level: 0, first_review: true, is_review: false };
 const questions = [{
   word_id: 1, prompt: "một", repetition_level_after_correct: 3,
   choices: [{ id: 1, text: "one" }, { id: 2, text: "two" }],
@@ -149,6 +149,28 @@ test("leaving flashcards cancels timer and discards the round without changing t
   assert.equal(h.run("flashcards.cards.length"), 0);
   await startFlash(h);
   assert.equal(h.el("flashcard-panel").hidden, false);
+});
+
+test("review/new labels follow each quiz question and flashcard", async () => {
+  const h = setup();
+  await startFlash(h);
+  assert.equal(h.el("flashcard-kind").textContent, "Từ ôn lại");
+  h.run('showView("quiz")');
+  const quizStart = h.run('startQuiz("av")');
+  h.requests.at(-1).respond({ round_id: "round-1", questions: [
+    { ...questions[0], is_review: false },
+    { ...questions[0], word_id: 2, prompt: "fresh", is_review: true },
+  ] });
+  await flush();
+  h.requests.at(-1).respond({ practice_count: 1 });
+  await quizStart;
+  assert.equal(h.el("question-kind").textContent, "Từ mới");
+  h.run("quiz.index = 1");
+  const next = h.run("renderQuestion()");
+  await flush();
+  h.requests.at(-1).respond({ practice_count: 2 });
+  await next;
+  assert.equal(h.el("question-kind").textContent, "Từ ôn lại");
 });
 
 test("restarting flashcards stops the old timer before the start response", async () => {

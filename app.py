@@ -382,9 +382,15 @@ def create_app(test_config=None):
         reset_daily_practice(db, now)
         now_text = now.isoformat()
         due = "(next_review_at <= ? OR (repetition_level = 0 AND practice_count = 0))"
+        eligible = f"repetition_level < 8 AND {due} AND {hard_clause(hard)}"
+        review_exists = db.execute(
+            f"SELECT 1 FROM {table} WHERE {eligible} AND practice_count > 0 LIMIT 1",
+            (now_text,),
+        ).fetchone()
+        practice_filter = "practice_count > 0" if review_exists else "practice_count = 0"
+        new_limit = "LIMIT 20" if practice_filter == "practice_count = 0" else ""
         rows = db.execute(
-            f"SELECT * FROM {table} WHERE repetition_level < 8 AND {due} AND {hard_clause(hard)} "
-            "ORDER BY CASE WHEN practice_count > 0 THEN 0 ELSE 1 END, RANDOM()",
+            f"SELECT * FROM {table} WHERE {eligible} AND {practice_filter} ORDER BY RANDOM() {new_limit}",
             (now_text,),
         ).fetchall()
         round_id = uuid.uuid4().hex
@@ -706,7 +712,7 @@ def create_app(test_config=None):
             for word in due_words:
                 if table == "synonymous_collocations":
                     word = db.execute(
-                        "SELECT id, english_pattern AS english, synonym_pattern AS synonym, repetition_level FROM synonymous_collocations WHERE id = ?",
+                        "SELECT id, english_pattern AS english, synonym_pattern AS synonym, repetition_level, practice_count FROM synonymous_collocations WHERE id = ?",
                         (word["id"],),
                     ).fetchone()
                     group = ("leading" if word["english"].startswith("...") or word["synonym"].startswith("...")
@@ -738,6 +744,7 @@ def create_app(test_config=None):
                            (json.dumps([choice["id"] for choice in choices]), word["id"]))
                 question = {
                     "word_id": word["id"], "prompt": word["english"] if mode == "av" else word[meaning_field],
+                    "is_review": word["practice_count"] > 0,
                     "repetition_level_after_correct": min(word["repetition_level"] + 2, 8),
                     "choices": [{"id": choice["id"], "text": choice[meaning_field if mode == "av" else "english"]} for choice in choices],
                 }
@@ -802,6 +809,7 @@ def create_app(test_config=None):
             meaning_field = "synonym" if table == "synonymous_collocations" else "vietnamese"
             cards = [{"word_id": row["id"], "front": row[meaning_field if mode == "va" else "english"],
                       "back": row["english" if mode == "va" else meaning_field],
+                      "is_review": row["practice_count"] > 0,
                       **({"vietnamese": row["vietnamese"]} if table == "synonymous_collocations" else {}),
                       "repetition_level": row["repetition_level"],
                       "first_review": row["practice_count"] == 0 and row["repetition_level"] == 0} for row in rows]

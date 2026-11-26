@@ -46,10 +46,17 @@ class ReviewTests(unittest.TestCase):
         for kind in ('quiz', 'flashcard'):
             for elapsed, delta in ((0,1),(5000,1),(5001,0),(10000,0)):
                 with self.subTest(kind=kind, elapsed=elapsed):
-                    word = self.seed(8 if kind == 'quiz' else 1, 3)
+                    with closing(sqlite3.connect(self.path)) as db, db:
+                        db.execute('DELETE FROM collocations')
+                        db.execute('DELETE FROM review_round_words')
+                        db.execute('DELETE FROM review_receipts')
+                        db.execute('UPDATE review_state SET round_id = NULL, round_kind = NULL, round_mode = NULL WHERE singleton = 1')
+                    self.seed(8 if kind == 'quiz' else 1, 3)
                     round_data = self.start(kind)
                     rid = round_data['round_id']
-                    self.assertEqual(self.show(word,rid).status_code,200)
+                    word = round_data['questions'][0]['word_id'] if kind == 'quiz' else round_data['cards'][0]['word_id']
+                    shown = self.show(word, rid)
+                    self.assertEqual(shown.status_code, 200, shown.json)
                     if kind == 'flashcard':
                         response = self.answer(word,rid,elapsed=elapsed)
                     else:
@@ -80,6 +87,21 @@ class ReviewTests(unittest.TestCase):
         self.assertEqual(self.answer(word,newer,'known',3000).json['repetition_level'],8)
         self.assertEqual(self.answer(word,newer).status_code,409)
 
+    def test_quiz_accepts_all_choices_with_the_same_normalized_meaning(self):
+        target = self.seed(8, level=3)
+        with closing(sqlite3.connect(self.path)) as db, db:
+            db.execute("UPDATE collocations SET vietnamese = '  QUẢ   TÁO ' WHERE id IN (?, ?)", (target, target + 1))
+        data = self.client.post('/api/quiz/start?mode=av&table=collocations').json
+        question = next(q for q in data['questions'] if q['word_id'] == target)
+        self.show(target, data['round_id'])
+        response = self.client.post('/api/quiz/answer?mode=av&table=collocations', json=dict(
+            round_id=data['round_id'], word_id=target, selected_id=target + 1,
+            response_time_ms=2000, choice_ids=[choice['id'] for choice in question['choices']],
+        ))
+        self.assertEqual(response.status_code, 200, response.json)
+        self.assertTrue(response.json['correct'])
+        self.assertCountEqual(response.json['correct_option_ids'], [target, target + 1])
+
     def test_quiz_timeout_choices_and_synonyms(self):
         word=self.seed(8,3)
         with closing(sqlite3.connect(self.path)) as db, db:
@@ -95,18 +117,47 @@ class ReviewTests(unittest.TestCase):
         self.assertEqual(response.json['repetition_level'],2)
         self.assertCountEqual(response.json['correct_option_ids'],[word,word+1])
 
-    def test_rounds_randomize_within_practiced_then_fresh_priority(self):
-        self.seed(80)
+    def test_round_contains_only_review_or_only_new_items(self):
+        review_start = self.seed(10)
         with closing(sqlite3.connect(self.path)) as db, db:
-            db.execute("UPDATE collocations SET practice_count = 1 WHERE id <= 40")
+            db.execute("UPDATE collocations SET practice_count = 1 WHERE id BETWEEN ? AND ?",
+                       (review_start, review_start + 2))
+        for _ in range(3):
+            data = self.start()
+            self.assertEqual({card['word_id'] for card in data['cards']}, set(range(review_start, review_start + 3)))
+            self.assertTrue(all(card['is_review'] for card in data['cards']))
+        with closing(sqlite3.connect(self.path)) as db, db:
+            db.execute("UPDATE collocations SET next_review_at = ? WHERE id BETWEEN ? AND ?",
+                       ((self.now + timedelta(days=1)).isoformat(), review_start, review_start + 2))
+        data = self.start()
+        self.assertEqual({card['word_id'] for card in data['cards']}, set(range(review_start + 3, review_start + 10)))
+        self.assertTrue(all(not card['is_review'] for card in data['cards']))
+
+    def test_review_only_round_is_randomized(self):
+        start = self.seed(80)
+        reviewed_ids = set(range(start, start + 40))
+        with closing(sqlite3.connect(self.path)) as db, db:
+            db.execute("UPDATE collocations SET practice_count = 1 WHERE id BETWEEN ? AND ?",
+                       (start, start + 39))
         seen = set()
         for _ in range(12):
             data = self.start()
             ids = [card['word_id'] for card in data['cards']]
-            self.assertEqual(len(ids), 80)
-            self.assertTrue(all(word_id <= 40 for word_id in ids[:40]))
-            self.assertTrue(all(word_id > 40 for word_id in ids[40:]))
-            seen.add(tuple(ids[:40]))
+            self.assertEqual(len(ids), 40)
+            self.assertEqual(set(ids), reviewed_ids)
+            seen.add(tuple(ids))
+        self.assertGreater(len(seen), 1)
+
+    def test_new_round_is_capped_at_twenty_random_items(self):
+        self.seed(45)
+        seen = set()
+        for _ in range(12):
+            data = self.start()
+            ids = [card['word_id'] for card in data['cards']]
+            self.assertEqual(len(ids), 20)
+            self.assertTrue(all(not card['is_review'] for card in data['cards']))
+            self.assertTrue(set(ids) <= set(range(1, 46)))
+            seen.add(tuple(ids))
         self.assertGreater(len(seen), 1)
 
     def test_hard_rounds_are_unlimited_and_randomized(self):
@@ -121,18 +172,20 @@ class ReviewTests(unittest.TestCase):
             seen.add(tuple(ids))
         self.assertGreater(len(seen), 1)
 
-    def test_priority_and_randomization_apply_to_vocabulary_too(self):
-        self.seed(80, table='vocabulary')
+    def test_vocabulary_review_round_is_homogeneous_and_randomized(self):
+        start = self.seed(80, table='vocabulary')
+        reviewed_ids = set(range(start, start + 40))
         with closing(sqlite3.connect(self.path)) as db, db:
-            db.execute("UPDATE vocabulary SET practice_count = 1 WHERE id <= 40")
+            db.execute("UPDATE vocabulary SET practice_count = 1 WHERE id BETWEEN ? AND ?",
+                       (start, start + 39))
         seen = set()
         for _ in range(12):
             data = self.client.post('/api/flashcard/start?table=vocabulary').json
             ids = [card['word_id'] for card in data['cards']]
-            self.assertEqual(len(ids), 80)
-            self.assertTrue(all(word_id <= 40 for word_id in ids[:40]))
-            self.assertTrue(all(word_id > 40 for word_id in ids[40:]))
-            seen.add(tuple(ids[:40]))
+            self.assertEqual(len(ids), 40)
+            self.assertEqual(set(ids), reviewed_ids)
+            self.assertTrue(all(card['is_review'] for card in data['cards']))
+            seen.add(tuple(ids))
         self.assertGreater(len(seen), 1)
 
     def test_delete_round_word_and_new_words_ignore_complete(self):

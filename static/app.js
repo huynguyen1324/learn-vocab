@@ -321,6 +321,7 @@ async function renderQuestion() {
   paintProgress("quiz", 0);
   const panel = document.querySelector("#quiz-panel");
   const count = document.querySelector("#question-count");
+  const kind = document.querySelector("#question-kind");
   const prompt = document.querySelector("#question-prompt");
   const stage = document.querySelector("#question-stage");
   const choices = document.querySelector("#choices");
@@ -330,6 +331,7 @@ async function renderQuestion() {
 
   if (quiz.index >= quiz.questions.length) {
     count.textContent = "";
+    kind.textContent = "";
     prompt.textContent = `Đã hoàn thành lượt ôn. Số câu đúng: ${quiz.correct}/${quiz.questions.length}.`;
     stage.textContent = "";
     choices.replaceChildren();
@@ -342,6 +344,7 @@ async function renderQuestion() {
 
   const question = quiz.questions[quiz.index];
   count.textContent = `Câu ${quiz.index + 1}/${quiz.questions.length}`;
+  kind.textContent = question.is_review ? "Từ ôn lại" : "Từ mới";
   prompt.textContent = question.prompt;
   stage.textContent = "Đúng ≤5 giây / ≤10 giây theo mức từ. Hết 10 giây hoặc sai: trừ hoặc giữ mức.";
   choices.replaceChildren();
@@ -625,6 +628,7 @@ async function renderFlashcard() {
   const next = document.querySelector("#flashcard-next");
   if (flashcards.index >= flashcards.cards.length) {
     document.querySelector("#flashcard-count").textContent = "Đã hoàn thành lượt ôn.";
+    document.querySelector("#flashcard-kind").textContent = "";
     document.querySelector("#flashcard-stage").textContent = "";
     document.querySelector("#flashcard-front").textContent = "";
     document.querySelector("#flashcard-back").hidden = true;
@@ -640,6 +644,7 @@ async function renderFlashcard() {
   }
   const card = flashcards.cards[flashcards.index];
   document.querySelector("#flashcard-count").textContent = `Câu ${flashcards.index + 1}/${flashcards.cards.length}`;
+  document.querySelector("#flashcard-kind").textContent = card.is_review ? "Từ ôn lại" : "Từ mới";
   document.querySelector("#flashcard-stage").textContent = `Mức thông thạo: ${card.repetition_level}/8`;
   document.querySelector("#flashcard-front").textContent = card.front;
   document.querySelector("#flashcard-back").textContent = card.back;

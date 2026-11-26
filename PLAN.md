@@ -1,1 +1,3 @@
-- Ôn trắc nghiệm với synonynous_collocations. Hiện tại đáp án hiện "Nghĩa tiếng Việt". Muốn hiện thêm "Tiếng Anh", "Đồng nghĩa" để thành 3 hàng: "Tiếng Anh", "Đồng nghĩa", "Nghĩa tiếng Việt"
+- Ở tất cả mục ôn, với tất cả loại từ, phân tách rõ ràng danh sách có practice_count > 0 (từ ôn lại) và practice_count = 0 (từ mới)
+- Hiển thị trên giao diện dòng "Từ ôn lại" hoặc "Từ mới" ngay trên khung câu hỏi
+- Thêm kiểm tra chống trùng đáp án ở phần ôn trắc nghiệm

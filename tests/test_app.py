@@ -356,7 +356,7 @@ class VocabularyAppTests(unittest.TestCase):
         av = self.client.post("/api/flashcard/start?mode=av&table=collocations")
         va = self.client.post("/api/flashcard/start?mode=va&table=collocations")
         self.assertEqual(av.json["cards"], [{
-            "word_id": target_id, "front": "apple", "back": "quả táo", "repetition_level": 0, "first_review": True,
+            "word_id": target_id, "front": "apple", "back": "quả táo", "repetition_level": 0, "first_review": True, "is_review": False,
         }])
         self.assertEqual(va.json["cards"][0]["front"], "quả táo")
         self.assertEqual(va.json["cards"][0]["back"], "apple")
